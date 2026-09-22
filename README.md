@@ -1,35 +1,28 @@
 # AStock-Trader-Skill
 
-A rule-based A-share short-term trading analysis skill focused on **market regime, multi-factor scoring, T-trading state, and risk control**.
+A rule-based A-share short-term decision-support skill.
 
-> This project produces decision-support signals, not guaranteed forecasts or investment advice.
+## v0.2
+- AKShare/Eastmoney 1m/5m/15m data
+- EMA, MACD, RSI, ATR, ADX, Bollinger, OBV, VWAP
+- multi-timeframe alignment
+- breakout / false-breakout detection with volume confirmation
+- market-regime state machine
+- 0-100 factor score
+- core/T-position aware signals
+- concentration risk gate
+- compact trading card
+- Backtrader starter strategy + tests
 
-## v0.1
+> Signals are decision support, not guaranteed forecasts. Data providers can be delayed or unavailable.
 
-- AKShare-first market data adapter (extensible to Tushare)
-- EMA / MACD / RSI / ATR / ADX / Bollinger / OBV / VWAP indicators
-- Market regime classifier
-- 0-100 multi-factor score
-- Position-aware decision engine
-- Hard risk gate for concentrated positions
-- Compact JSON / trading-card output
-- Backtest-ready strategy core
-
-## Quick start
-
+## Run
 ```bash
 pip install -r requirements.txt
-python main.py 002475
-```
-
-Optional position context:
-
-```bash
 python main.py 002475 --cost 56 --shares 2200 --portfolio-weight 0.95
+python main.py 002475 --json
 ```
 
-## Design principle
+Default output is intentionally short: state, score, action, T-action, support/resistance and invalidation reference.
 
-Indicators do not vote blindly. The engine first classifies market regime, then interprets momentum, trend, volume and volatility in context. Risk rules override signal scores.
-
-See `SKILL.md` for agent behavior and `config/strategy.yaml` for tunable parameters.
+See `SKILL.md` and `config/strategy.yaml`.
