@@ -7,7 +7,6 @@ weights:
   volatility: 5
   relative_strength: 10
   multi_timeframe: 10
-
 indicators:
   ema: [5, 10, 20, 60]
   macd: [12, 26, 9]
@@ -15,13 +14,13 @@ indicators:
   atr: 14
   adx: 14
   bollinger: [20, 2.0]
-
 risk:
   concentration_limit: 0.50
   atr_stop_multiple: 1.5
   max_t_fraction: 0.25
-
 signals:
+  breakout_lookback: 20
   breakout_volume_ratio: 1.20
   strong_score: 70
   weak_score: 40
+timeframes: ["1", "5", "15"]
