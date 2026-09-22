@@ -1,0 +1,6 @@
+akshare>=1.17
+pandas>=2.0
+numpy>=1.26
+PyYAML>=6.0
+backtrader>=1.9.78
+# Optional: TA-Lib (native library may be required)
