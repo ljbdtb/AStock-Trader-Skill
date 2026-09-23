@@ -54,3 +54,25 @@ def test_evaluate_reports_exposure_turnover():
     position = pd.Series([0., 1., 1., 0.])
     metrics = evaluate(close, position, cost_bps=0)
     assert metrics.turnover == 1.0
+
+from backtest.walk_forward import reconstruct_trades
+
+
+def test_reconstruct_trades_counts_completed_flat_to_flat_episode():
+    close = pd.Series([100., 100., 110., 110., 110.])
+    signal = pd.Series([0., 1., 1., 0., 0.])
+    metrics = evaluate(close, signal, cost_bps=0)
+    assert metrics.trade_count == 1
+    assert metrics.rebalance_events == 2
+    assert abs(metrics.expectancy - 0.10) < 1e-12
+    assert metrics.win_rate == 1.0
+    assert metrics.average_holding_period == 2.0
+    assert metrics.open_trades == 0
+
+
+def test_reconstruct_trades_excludes_open_episode_from_closed_stats():
+    close = pd.Series([100., 100., 110., 120.])
+    signal = pd.Series([0., 1., 1., 1.])
+    metrics = evaluate(close, signal, cost_bps=0)
+    assert metrics.trade_count == 0
+    assert metrics.open_trades == 1

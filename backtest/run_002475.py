@@ -135,7 +135,12 @@ def summarize(rows, label):
         "worst_oos_drawdown": round(float(frame.oos_max_drawdown.min()), 6),
         "turnover": round(float(frame.turnover.sum()), 6) if "turnover" in frame else None,
         "profitable_folds": int((frame.oos_return > 0).sum()),
-        "trades": int(frame.trades.sum()),
+        "rebalance_events": int(frame.rebalance_events.sum()),
+        "trade_count": int(frame.trade_count.sum()),
+        "profit_factor": (float(frame.gross_profit.sum() / frame.gross_loss.sum()) if frame.gross_loss.sum() else float("inf")),
+        "expectancy": (float(frame.trade_return_sum.sum() / frame.trade_count.sum()) if frame.trade_count.sum() else 0.0),
+        "win_rate": float(frame.win_rate.mean()),
+        "average_holding_period": float(frame.average_holding_period.mean()),
     }
     return summary, frame
 
@@ -256,7 +261,7 @@ def main():
                 "oos_return": metric.total_return,
                 "oos_sharpe": metric.sharpe,
                 "oos_max_drawdown": metric.max_drawdown,
-                "trades": metric.trades,
+                "rebalance_events": metric.rebalance_events, "trade_count": metric.trade_count, "turnover": metric.turnover,
             }
         )
 
@@ -270,6 +275,52 @@ def main():
     for summary, frame in results:
         print("SUMMARY", summary)
         print(frame.to_csv(index=False))
+
+    # All-in cost multipliers are predeclared; each component remains explicit.
+    cost_rows, cost_scenarios = [], []
+    for multiplier, label in ((1.0, "BASE_COST"), (1.5, "1.5X_COST"), (2.0, "2.0X_COST")):
+        commission = 2.5 * multiplier
+        regulatory = 0.541 * multiplier
+        slippage = 5.0 * multiplier
+        stamp_tax = 5.0 * multiplier
+        buy_cost = commission + regulatory + slippage
+        sell_cost = commission + regulatory + slippage + stamp_tax
+        cost_scenarios.append({
+            "label": label, "multiplier": multiplier,
+            "commission_bps_each_side": commission,
+            "regulatory_fees_bps_each_side": regulatory,
+            "stamp_tax_bps_sell_only": stamp_tax,
+            "slippage_bps_each_side": slippage,
+            "buy_cost_bps": buy_cost, "sell_cost_bps": sell_cost,
+        })
+        stressed = walk_forward(
+            df, make_vol_target_signal(0.20, 20), grid,
+            train=TRAIN, test=TEST, embargo=EMBARGO,
+            buy_cost_bps=buy_cost, sell_cost_bps=sell_cost,
+        )
+        gross_profit, gross_loss = stressed.gross_profit.sum(), stressed.gross_loss.sum()
+        trade_count = int(stressed.trade_count.sum())
+        cost_rows.append({
+            "scenario": label,
+            "mean_oos_return": float(stressed.oos_return.mean()),
+            "mean_oos_sharpe": float(stressed.oos_sharpe.mean()),
+            "worst_drawdown": float(stressed.oos_max_drawdown.min()),
+            "turnover": float(stressed.turnover.sum()),
+            "trade_count": trade_count,
+            "profit_factor": float(gross_profit / gross_loss) if gross_loss else float("inf"),
+            "expectancy": float(stressed.trade_return_sum.sum() / trade_count) if trade_count else 0.0,
+        })
+    base_return, double_return = cost_rows[0]["mean_oos_return"], cost_rows[-1]["mean_oos_return"]
+    cost_status = "COST_SENSITIVE" if double_return <= 0 or double_return < base_return * 0.5 else "PASS"
+    print("COST_COMPONENTS")
+    for scenario in cost_scenarios:
+        print("COST_SCENARIO", scenario)
+    print("COST_STRESS")
+    print(pd.DataFrame(cost_rows).to_csv(index=False))
+    print("COST_STRESS_STATUS", {
+        "status": cost_status,
+        "rule": "COST_SENSITIVE if 2x mean OOS return <= 0 or below 50% of base mean OOS return",
+    })
 
     reference = results[0][0]
     print(
