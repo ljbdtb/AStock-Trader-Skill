@@ -50,16 +50,34 @@ def symbol_with_market(code):
 
 def load_daily(code):
     market_symbol = symbol_with_market(code)
-    raw = retry_fetch(
-        lambda: ak.stock_zh_a_hist_tx(
-            symbol=market_symbol,
-            start_date=START,
-            end_date=END,
-            adjust="qfq",
-            timeout=30,
-        ),
-        f"Tencent {market_symbol}",
-    )
+    if code == "300750":
+        # Tencent qfq returned negative adjusted IPO prices for this symbol;
+        # use the independently audited Eastmoney qfq series instead.
+        raw = retry_fetch(
+            lambda: ak.stock_zh_a_hist(
+                symbol=code,
+                period="daily",
+                start_date=START,
+                end_date=END,
+                adjust="qfq",
+                timeout=30,
+            ),
+            f"Eastmoney {code}",
+        )
+        source = "AKShare stock_zh_a_hist (Eastmoney)"
+    else:
+        raw = retry_fetch(
+            lambda: ak.stock_zh_a_hist_tx(
+                symbol=market_symbol,
+                start_date=START,
+                end_date=END,
+                adjust="qfq",
+                timeout=30,
+            ),
+            f"Tencent {market_symbol}",
+        )
+        source = "AKShare stock_zh_a_hist_tx (Tencent)"
+
     df = raw.rename(
         columns={
             "日期": "date",
@@ -78,7 +96,9 @@ def load_daily(code):
     df["date"] = pd.to_datetime(df["date"])
     for col in required[1:]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df.sort_values("date").reset_index(drop=True)
+    df = df.sort_values("date").reset_index(drop=True)
+    df.attrs["source"] = source
+    return df
 
 
 def audit(df, code):
@@ -93,7 +113,7 @@ def audit(df, code):
     bad_rows = df.loc[bad_ohlc_mask, ["date", "open", "high", "low", "close"]]
     report = {
         "symbol": code,
-        "source": "AKShare stock_zh_a_hist_tx (Tencent)",
+        "source": df.attrs.get("source", "UNKNOWN"),
         "adjust": "qfq",
         "rows": len(df),
         "first": str(df.date.iloc[0].date()) if len(df) else None,
@@ -154,7 +174,7 @@ def main():
     summaries, audits = [], []
     print("FIXED_PROTOCOL", {
         "symbols": SYMBOLS,
-        "source": "Tencent via AKShare stock_zh_a_hist_tx for every security",
+        "provider_policy": "Tencent qfq by default; Eastmoney qfq for 300750 because Tencent qfq produced negative IPO prices",
         "adjust": "qfq",
         "target_vol": TARGET_VOL,
         "vol_lookback": VOL_WINDOW,
@@ -199,7 +219,7 @@ def main():
         "symbols_with_positive_mean_oos_return": int((result.mean_oos_return > 0).sum()),
         "median_mean_oos_sharpe": float(result.mean_oos_sharpe.median()),
         "median_mean_oos_return": float(result.mean_oos_return.median()),
-        "all_data_from_same_provider": len({x["source"] for x in audits}) == 1,
+        "providers_used": sorted({x["source"] for x in audits}),
         "interpretation": (
             "descriptive generalization check only; selected surviving large-cap names "
             "do not remove survivorship or selection bias"
