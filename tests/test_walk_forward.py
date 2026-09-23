@@ -21,3 +21,36 @@ def test_embargo_gap():
     assert tr.stop==120
     assert te.start==125
     assert te.start-tr.stop==5
+
+from backtest.risk_sizing import volatility_target_exposure
+
+
+def test_volatility_sizing_uses_only_current_and_past_closes():
+    close = pd.Series([100., 101., 99., 102., 98., 103., 100., 101., 99., 104.])
+    baseline = volatility_target_exposure(close, target_vol=0.20, lookback=3)
+    changed_future = close.copy()
+    changed_future.iloc[7:] *= 3
+    revised = volatility_target_exposure(changed_future, target_vol=0.20, lookback=3)
+    pd.testing.assert_series_equal(baseline.iloc[:7], revised.iloc[:7])
+
+
+def test_volatility_sizing_caps_exposure_and_warms_up_flat():
+    close = pd.Series([100., 101., 100., 101., 100., 101., 100.])
+    exposure = volatility_target_exposure(close, target_vol=0.20, lookback=3)
+    assert exposure.iloc[:3].eq(0).all()
+    assert exposure.between(0, 1).all()
+    assert exposure.iloc[3:].max() == 1.0
+
+
+def test_volatility_sizing_has_no_internal_execution_shift():
+    close = pd.Series([100., 101., 99., 102., 98., 103., 100.])
+    weight = volatility_target_exposure(close, target_vol=0.20, lookback=2)
+    executed = weight.shift(1).fillna(0)
+    assert executed.iloc[4] == weight.iloc[3]
+
+
+def test_evaluate_reports_exposure_turnover():
+    close = pd.Series([100., 100., 110., 110.])
+    position = pd.Series([0., 1., 1., 0.])
+    metrics = evaluate(close, position, cost_bps=0)
+    assert metrics.turnover == 1.0

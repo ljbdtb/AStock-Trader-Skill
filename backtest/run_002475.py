@@ -3,6 +3,7 @@ import akshare as ak
 import pandas as pd
 import time
 
+from backtest.risk_sizing import volatility_target_exposure
 from backtest.walk_forward import evaluate, walk_forward
 
 SYMBOL = "002475"
@@ -104,17 +105,17 @@ def ema_signal(df, fast=10, slow=20):
     return (fast_ma > slow_ma).astype(float)
 
 
-def vol_target_ema_signal(df, fast=10, slow=20, use_trend=False):
-    base = ema_signal(df, fast=fast, slow=slow)
-    returns = df.close.pct_change()
-    realized_vol = returns.rolling(VOL_WINDOW, min_periods=VOL_WINDOW).std() * (252**0.5)
-    # Use only volatility known before today's close/execution.
-    exposure = (TARGET_VOL / realized_vol.shift(1)).clip(upper=1.0).fillna(0.0)
-    if use_trend:
-        long_ma = df.close.rolling(TREND_WINDOW, min_periods=TREND_WINDOW).mean()
-        base = base * df.close.gt(long_ma).astype(float)
-    return base * exposure
-
+def make_vol_target_signal(target_vol, lookback, use_trend=False):
+    def signal(df, fast=10, slow=20):
+        base = ema_signal(df, fast=fast, slow=slow)
+        if use_trend:
+            long_ma = df.close.rolling(TREND_WINDOW, min_periods=TREND_WINDOW).mean()
+            base = base * df.close.gt(long_ma).astype(float)
+        # Close-time weight; evaluate() shifts once so it first earns t+1 returns.
+        return base * volatility_target_exposure(
+            df.close, target_vol=target_vol, lookback=lookback, max_position=1.0
+        )
+    return signal
 
 def folds(n):
     start = TRAIN
@@ -132,6 +133,7 @@ def summarize(rows, label):
         "median_oos_return": round(float(frame.oos_return.median()), 6),
         "mean_oos_sharpe": round(float(frame.oos_sharpe.mean()), 4),
         "worst_oos_drawdown": round(float(frame.oos_max_drawdown.min()), 6),
+        "turnover": round(float(frame.turnover.sum()), 6) if "turnover" in frame else None,
         "profitable_folds": int((frame.oos_return > 0).sum()),
         "trades": int(frame.trades.sum()),
     }
@@ -177,25 +179,65 @@ def main():
         df, ema_signal, grid, train=TRAIN, test=TEST, embargo=EMBARGO, **COSTS
     )
     vol_target = walk_forward(
-        df,
-        vol_target_ema_signal,
-        grid,
-        train=TRAIN,
-        test=TEST,
-        embargo=EMBARGO,
-        **COSTS,
+        df, make_vol_target_signal(TARGET_VOL, VOL_WINDOW), grid,
+        train=TRAIN, test=TEST, embargo=EMBARGO, **COSTS
     )
     vol_trend = walk_forward(
-        df,
-        lambda frame, fast, slow: vol_target_ema_signal(
-            frame, fast=fast, slow=slow, use_trend=True
-        ),
-        grid,
-        train=TRAIN,
-        test=TEST,
-        embargo=EMBARGO,
-        **COSTS,
+        df, make_vol_target_signal(TARGET_VOL, VOL_WINDOW, use_trend=True), grid,
+        train=TRAIN, test=TEST, embargo=EMBARGO, **COSTS
     )
+
+    # Frozen before examining results; all 12 cells are retained and reported.
+    stability_rows = []
+    for target_vol in (0.15, 0.20, 0.25):
+        for lookback in (15, 20, 30, 40):
+            matrix = walk_forward(
+                df, make_vol_target_signal(target_vol, lookback), grid,
+                train=TRAIN, test=TEST, embargo=EMBARGO, **COSTS
+            )
+            stability_rows.append({
+                "target_vol": target_vol,
+                "lookback": lookback,
+                "mean_oos_return": float(matrix.oos_return.mean()),
+                "mean_oos_sharpe": float(matrix.oos_sharpe.mean()),
+                "worst_drawdown": float(matrix.oos_max_drawdown.min()),
+                "profitable_windows": int((matrix.oos_return > 0).sum()),
+                "turnover": float(matrix.turnover.sum()),
+            })
+    stability = pd.DataFrame(stability_rows)
+    local = stability[
+        stability.target_vol.isin((0.15, 0.20, 0.25))
+        & stability.lookback.isin((15, 20, 30))
+    ]
+    center = float(stability.loc[
+        (stability.target_vol == 0.20) & (stability.lookback == 20),
+        "mean_oos_sharpe"
+    ].iloc[0])
+    positive_local = int((local.mean_oos_sharpe > 0).sum())
+    center_q25 = float(local.mean_oos_sharpe.quantile(0.25))
+    if positive_local >= 7 and center >= center_q25:
+        stability_status = "STABLE"
+    elif positive_local >= 5:
+        stability_status = "FRAGILE"
+    else:
+        stability_status = "FAIL"
+    print("PARAMETER_STABILITY_CRITERIA", {
+        "grid": {"target_vol": [0.15, 0.20, 0.25], "lookback": [15, 20, 30, 40]},
+        "max_position": 1.0,
+        "local_neighborhood": "target_vol 15/20/25% x lookback 15/20/30",
+        "STABLE": "at least 7/9 local cells have positive mean OOS Sharpe and center >= local 25th percentile",
+        "FRAGILE": "5-6/9 local cells have positive mean OOS Sharpe",
+        "FAIL": "fewer than 5/9 local cells have positive mean OOS Sharpe",
+    })
+    print("PARAMETER_MATRIX")
+    print(stability.to_csv(index=False))
+    print("PARAMETER_STABILITY", {
+        "status": stability_status,
+        "positive_local_cells": positive_local,
+        "local_cells": len(local),
+        "center_sharpe": center,
+        "local_sharpe_q25": center_q25,
+    })
 
     index_rows = []
     for fold, (_, te) in enumerate(folds(len(df)), 1):

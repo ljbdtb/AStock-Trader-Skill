@@ -9,6 +9,7 @@ class Metrics:
     sharpe:float
     max_drawdown:float
     trades:int
+    turnover:float=0.0
 
 def evaluate(close:pd.Series,position:pd.Series,cost_bps=10.0,buy_cost_bps=None,sell_cost_bps=None):
     """Evaluate next-bar execution with explicit directional costs.
@@ -30,7 +31,8 @@ def evaluate(close:pd.Series,position:pd.Series,cost_bps=10.0,buy_cost_bps=None,
     sd=float(net.std())
     sharpe=float(np.sqrt(252)*net.mean()/sd) if sd>0 else 0.0
     trades=int(((buys+sells)>0).sum())
-    return Metrics(float(equity.iloc[-1]-1),sharpe,float(dd.min()),trades)
+    turnover=float((buys+sells).sum())
+    return Metrics(float(equity.iloc[-1]-1),sharpe,float(dd.min()),trades,turnover)
 
 def expanding_windows(n,train=120,test=40,embargo=5):
     start=train
@@ -57,5 +59,5 @@ def walk_forward(df,signal_fn,param_grid,train=120,test=40,embargo=5,cost_bps=10
         sub_pos=p.iloc[start:]
         m=evaluate(sub_close,sub_pos,cost_bps,buy_cost_bps,sell_cost_bps)
         rows.append({"fold":fold,**params,"oos_return":m.total_return,
-                     "oos_sharpe":m.sharpe,"oos_max_drawdown":m.max_drawdown,"trades":m.trades})
+                     "oos_sharpe":m.sharpe,"oos_max_drawdown":m.max_drawdown,"trades":m.trades,"turnover":m.turnover})
     return pd.DataFrame(rows)
