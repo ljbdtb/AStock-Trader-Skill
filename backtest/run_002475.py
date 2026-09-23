@@ -31,18 +31,10 @@ def retry_fetch(fetch, label):
             time.sleep(2**attempt)
 
 
-def load_daily():
-    raw = retry_fetch(
-        lambda: ak.stock_zh_a_hist(
-            symbol=SYMBOL,
-            period="daily",
-            start_date=START,
-            end_date=END,
-            adjust=ADJUST,
-            timeout=30,
-        ),
-        "002475",
-    )
+DATA_SOURCE = None
+
+
+def normalize_daily(raw):
     df = raw.rename(
         columns={
             "日期": "date",
@@ -53,9 +45,60 @@ def load_daily():
             "成交量": "volume",
             "成交额": "amount",
         }
-    )
+    ).copy()
+    required = ["date", "open", "high", "low", "close", "volume"]
+    missing = [column for column in required if column not in df.columns]
+    if missing:
+        raise ValueError(f"daily provider response missing columns: {missing}")
     df["date"] = pd.to_datetime(df["date"])
+    for column in required[1:]:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
     return df.sort_values("date").reset_index(drop=True)
+
+
+def load_daily(provider="auto"):
+    """Use Eastmoney first, with a clearly logged Tencent fallback."""
+    global DATA_SOURCE
+    if provider not in ("auto", "eastmoney", "tencent"):
+        raise ValueError(f"unsupported provider: {provider}")
+
+    if provider in ("auto", "eastmoney"):
+        try:
+            raw = retry_fetch(
+                lambda: ak.stock_zh_a_hist(
+                    symbol=SYMBOL,
+                    period="daily",
+                    start_date=START,
+                    end_date=END,
+                    adjust=ADJUST,
+                    timeout=30,
+                ),
+                "Eastmoney 002475",
+            )
+            DATA_SOURCE = "AKShare stock_zh_a_hist (Eastmoney)"
+            return normalize_daily(raw)
+        except Exception as exc:
+            if provider == "eastmoney":
+                raise
+            print("DATA_SOURCE_FALLBACK", {
+                "from": "Eastmoney",
+                "to": "Tencent",
+                "reason": str(exc),
+            })
+
+    tencent_symbol = ("sh" if SYMBOL.startswith("6") else "sz") + SYMBOL
+    raw = retry_fetch(
+        lambda: ak.stock_zh_a_hist_tx(
+            symbol=tencent_symbol,
+            start_date=START,
+            end_date=END,
+            adjust=ADJUST,
+            timeout=30,
+        ),
+        f"Tencent {tencent_symbol}",
+    )
+    DATA_SOURCE = "AKShare stock_zh_a_hist_tx (Tencent)"
+    return normalize_daily(raw)
 
 
 def load_csi300():
@@ -93,7 +136,7 @@ def audit(df, benchmark):
         "monotonic_dates": bool(df.date.is_monotonic_increasing),
         "csi300_rows_in_period": len(benchmark),
         "common_trading_dates": overlap,
-        "source": "AKShare stock_zh_a_hist / Eastmoney",
+        "source": DATA_SOURCE,
         "adjust": ADJUST,
         "benchmark": "CSI 300 price index (sh000300, no dividends)",
     }
