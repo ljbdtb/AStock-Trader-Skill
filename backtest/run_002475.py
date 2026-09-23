@@ -1,6 +1,7 @@
 """002475 data/cost audit. Gate strategy interpretation on audit PASS."""
 import akshare as ak
 import pandas as pd
+import time
 from backtest.walk_forward import walk_forward
 
 SYMBOL = "002475"
@@ -10,13 +11,23 @@ ADJUST = "qfq"
 
 
 def load_daily():
-    raw = ak.stock_zh_a_hist(
-        symbol=SYMBOL,
-        period="daily",
-        start_date=START,
-        end_date=END,
-        adjust=ADJUST,
-    )
+    last_error = None
+    for attempt in range(5):
+        try:
+            raw = ak.stock_zh_a_hist(
+                symbol=SYMBOL,
+                period="daily",
+                start_date=START,
+                end_date=END,
+                adjust=ADJUST,
+                timeout=30,
+            )
+            break
+        except Exception as exc:
+            last_error = exc
+            if attempt == 4:
+                raise RuntimeError("Eastmoney data download failed after 5 attempts") from last_error
+            time.sleep(2 ** attempt)
     df = raw.rename(
         columns={
             "日期": "date",
