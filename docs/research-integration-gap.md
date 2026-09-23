@@ -8,7 +8,7 @@ Scope: stage D preparation only. The production decision engine is **not** claim
 
 The current validated benchmark remains a daily EMA walk-forward, not the Regime/Structure/T/risk decision engine.
 
-- Data audit for 002475 passed: 2,833 daily bars, 2015-01-05 through 2026-09-22, zero missing OHLCV, duplicate dates, invalid OHLC, or nonpositive volume. Eastmoney failed transiently; the run explicitly fell back to Tencent and reported the actual provider.
+- Data audit for 002475 passed: 2,833 daily bars, 2015-01-05 through 2026-09-22, zero missing OHLCV, duplicate dates, invalid OHLC, or nonpositive volume. The completed A/B run reported Eastmoney as its actual source; the fallback path is explicit and was used on earlier transient failures.
 - Parameter grid: target volatility 15/20/25%, lookback 15/20/30/40 sessions, exposure cap 100%. The predeclared local rule returned `STABLE` (9/9 local cells had positive mean OOS Sharpe; center Sharpe 0.4680 and local 25th percentile 0.4680). This is local consistency under that rule, not proof of economic edge.
 - Base-cost EMA + 20% volatility target: mean OOS return 6.10%, Sharpe 0.4680, worst drawdown -15.24%, 9/19 profitable windows. The 2x cost scenario retained 5.67% mean return, Sharpe 0.4110, worst drawdown -15.63%; it is `PASS` under the frozen cost-sensitivity rule (2x return remains positive and above half of base).
 - Trade-level evidence is weaker: at base cost, 54 completed exposure episodes had Profit Factor 0.853 and expectancy -0.00304 per episode; 10 fold-end episodes remained open and are excluded from closed-trade statistics. Thus the frozen cost rule passes, but the closed-trade statistics do not establish positive trade expectancy.
