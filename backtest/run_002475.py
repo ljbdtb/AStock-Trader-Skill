@@ -59,7 +59,7 @@ def load_daily():
 
 def load_csi300():
     index = retry_fetch(
-        lambda: ak.stock_zh_index_daily_em(symbol="sh000300"),
+        lambda: ak.stock_zh_index_daily(symbol="sh000300"),
         "CSI 300",
     )
     index["date"] = pd.to_datetime(index["date"])
