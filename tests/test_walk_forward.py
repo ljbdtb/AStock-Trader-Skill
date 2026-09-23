@@ -76,3 +76,22 @@ def test_reconstruct_trades_excludes_open_episode_from_closed_stats():
     metrics = evaluate(close, signal, cost_bps=0)
     assert metrics.trade_count == 0
     assert metrics.open_trades == 1
+
+
+from backtest.run_002475 import summarize
+
+
+def test_summarize_accepts_buy_and_hold_without_closed_trade_fields():
+    summary, _ = summarize(
+        [{
+            "oos_return": 0.05,
+            "oos_sharpe": 0.4,
+            "oos_max_drawdown": -0.1,
+            "turnover": 0.0,
+        }],
+        "buy-and-hold",
+    )
+    assert summary["trade_count"] == 0
+    assert summary["profit_factor"] == 0.0
+    assert summary["expectancy"] == 0.0
+    assert summary["turnover"] == 0.0

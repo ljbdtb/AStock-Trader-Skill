@@ -169,6 +169,15 @@ def folds(n):
 
 def summarize(rows, label):
     frame = pd.DataFrame(rows)
+
+    def total(column):
+        return float(frame[column].sum()) if column in frame else 0.0
+
+    def mean(column):
+        return float(frame[column].mean()) if column in frame else 0.0
+
+    gross_profit, gross_loss = total("gross_profit"), total("gross_loss")
+    trade_count = int(total("trade_count"))
     summary = {
         "candidate": label,
         "folds": len(frame),
@@ -176,14 +185,15 @@ def summarize(rows, label):
         "median_oos_return": round(float(frame.oos_return.median()), 6),
         "mean_oos_sharpe": round(float(frame.oos_sharpe.mean()), 4),
         "worst_oos_drawdown": round(float(frame.oos_max_drawdown.min()), 6),
-        "turnover": round(float(frame.turnover.sum()), 6) if "turnover" in frame else None,
+        "turnover": round(total("turnover"), 6),
         "profitable_folds": int((frame.oos_return > 0).sum()),
-        "rebalance_events": int(frame.rebalance_events.sum()),
-        "trade_count": int(frame.trade_count.sum()),
-        "profit_factor": (float(frame.gross_profit.sum() / frame.gross_loss.sum()) if frame.gross_loss.sum() else float("inf")),
-        "expectancy": (float(frame.trade_return_sum.sum() / frame.trade_count.sum()) if frame.trade_count.sum() else 0.0),
-        "win_rate": float(frame.win_rate.mean()),
-        "average_holding_period": float(frame.average_holding_period.mean()),
+        "rebalance_events": int(total("rebalance_events")),
+        "trade_count": trade_count,
+        "profit_factor": (gross_profit / gross_loss if gross_loss else (float("inf") if gross_profit else 0.0)),
+        "expectancy": (total("trade_return_sum") / trade_count if trade_count else 0.0),
+        "win_rate": mean("win_rate"),
+        "average_holding_period": mean("average_holding_period"),
+        "open_trades": int(total("open_trades")),
     }
     return summary, frame
 
@@ -210,7 +220,8 @@ def main():
             "target_annual_vol": TARGET_VOL,
             "lookback_sessions": VOL_WINDOW,
             "max_gross_exposure": 1.0,
-            "volatility_lag_sessions": 1,
+            "volatility_internal_lag_sessions": 0,
+            "execution_lag_sessions": 1,
             "trend_filter_sessions": TREND_WINDOW,
         },
     )
