@@ -84,13 +84,13 @@ def load_daily(code):
 def audit(df, code):
     columns = ["date", "open", "high", "low", "close", "volume"]
     missing = {col: int(df[col].isna().sum()) for col in columns}
-    bad_ohlc = int(
-        (
-            (df.high < df[["open", "close", "low"]].max(axis=1))
-            | (df.low > df[["open", "close", "high"]].min(axis=1))
-            | (df[["open", "high", "low", "close"]] <= 0).any(axis=1)
-        ).sum()
+    bad_ohlc_mask = (
+        (df.high < df[["open", "close", "low"]].max(axis=1))
+        | (df.low > df[["open", "close", "high"]].min(axis=1))
+        | (df[["open", "high", "low", "close"]] <= 0).any(axis=1)
     )
+    bad_ohlc = int(bad_ohlc_mask.sum())
+    bad_rows = df.loc[bad_ohlc_mask, ["date", "open", "high", "low", "close"]]
     report = {
         "symbol": code,
         "source": "AKShare stock_zh_a_hist_tx (Tencent)",
@@ -101,6 +101,7 @@ def audit(df, code):
         "missing": missing,
         "duplicate_dates": int(df.date.duplicated().sum()),
         "bad_ohlc": bad_ohlc,
+        "bad_ohlc_rows": bad_rows.to_dict("records"),
         "nonpositive_volume": int((df.volume <= 0).sum()),
         "monotonic_dates": bool(df.date.is_monotonic_increasing),
     }
