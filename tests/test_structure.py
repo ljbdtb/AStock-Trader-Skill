@@ -9,5 +9,6 @@ def test_breakout_detection():
       "low":[x-.05 for x in close],"close":close,"volume":[1000]*n})
     df.loc[n-1,["close","high","volume"]]=[11,11.1,3000]
     f=structure_features(add_indicators(df))
-    assert f["breakout"]
+    assert f["breakout_status"] == "BREAKOUT_ATTEMPT"
+    assert not f["breakout"]
     assert f["volume_ratio"]>1

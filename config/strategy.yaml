@@ -23,4 +23,18 @@ signals:
   breakout_volume_ratio: 1.20
   strong_score: 70
   weak_score: 40
+structure:
+  # Fixed v1 hypotheses; not calibrated on OOS performance.
+  pivot_lookback: 60
+  equal_level_tolerance_ratio: 0.001
+  volume_ratio_lookback: 20
+  volume_ratio_min_periods: 5
+  breakout_hold_bars: 2
+  breakout_rejection_bars: 3
+  breakout_close_position_min: 0.70
+regime:
+  # Fixed v1 hypotheses; not calibrated on OOS performance.
+  range_adx_max: 18
+  range_ema_slope_max_ratio: 0.002
+  strong_trend_adx_min: 20
 timeframes: ["1", "5", "15"]

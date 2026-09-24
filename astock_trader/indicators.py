@@ -29,6 +29,16 @@ def add_indicators(df):
     mid=df.close.rolling(20).mean(); std=df.close.rolling(20).std()
     df["boll_mid"]=mid; df["boll_upper"]=mid+2*std; df["boll_lower"]=mid-2*std
     tp=(df.high+df.low+df.close)/3
-    df["vwap"]=(tp*df.volume).cumsum()/df.volume.cumsum().replace(0,np.nan)
+    times=pd.to_datetime(df.time) if "time" in df else None
+    intraday=(times is not None and
+              (times.dt.hour.ne(0)|times.dt.minute.ne(0)|times.dt.second.ne(0)).any())
+    if intraday:
+        dates=times.dt.normalize()
+        cumulative_value=(tp*df.volume).groupby(dates).cumsum()
+        cumulative_volume=df.volume.groupby(dates).cumsum()
+    else:
+        cumulative_value=(tp*df.volume).cumsum()
+        cumulative_volume=df.volume.cumsum()
+    df["vwap"]=cumulative_value/cumulative_volume.replace(0,np.nan)
     df["obv"]=(np.sign(df.close.diff()).fillna(0)*df.volume).cumsum()
     return df

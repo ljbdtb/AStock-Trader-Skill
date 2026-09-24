@@ -51,14 +51,11 @@ def test_data_quality_rejects_stale_and_invalid_bars():
 def test_decision_applies_gate_to_t_action(monkeypatch):
     from astock_trader import decision
 
-    monkeypatch.setattr(decision, "classify", lambda df: "UPTREND")
-    monkeypatch.setattr(decision, "score", lambda *args: 50)
-    monkeypatch.setattr(decision, "structure_features", lambda df: {
-        "bias": "NEUTRAL", "high_state": "NA", "low_state": "NA",
-        "swing_low": None, "swing_high": None, "volume_ratio": 1.0})
+    monkeypatch.setattr(decision, "classify", lambda df, snapshot: "UPTREND")
+    monkeypatch.setattr(decision, "score", lambda *args, **kwargs: 50)
     frame = pd.DataFrame([{"close": 10., "low": 9., "high": 11.,
                            "atr14": 1., "vwap": 10., "rsi12": 50.,
-                           "macd_hist": 0.1}])
+                           "macd_hist": 0.1, "volume": 1000.}])
     ledger = PositionLedger(date(2026, 9, 24), core_shares=600, t_shares=200,
                             sold_t_today=100, portfolio_weight=0.95)
     assert decision.decide(frame, position=ledger, data_ok=True)["t_action"] == "WAIT"

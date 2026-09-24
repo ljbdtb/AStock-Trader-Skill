@@ -94,14 +94,11 @@ def test_decision_uses_ledger_sellable_count(monkeypatch):
     import pandas as pd
     from astock_trader import decision
 
-    monkeypatch.setattr(decision, "classify", lambda df: "RANGE")
-    monkeypatch.setattr(decision, "score", lambda *args: 50)
-    monkeypatch.setattr(decision, "structure_features", lambda df: {
-        "bias": "NEUTRAL", "high_state": "NA", "low_state": "NA",
-        "swing_low": None, "swing_high": None, "volume_ratio": 1.0})
+    monkeypatch.setattr(decision, "classify", lambda df, snapshot: "RANGE")
+    monkeypatch.setattr(decision, "score", lambda *args, **kwargs: 50)
     frame = pd.DataFrame([{"close": 10., "low": 9., "high": 11.,
                            "atr14": 1., "vwap": 10., "rsi12": 50.,
-                           "macd_hist": 0.1}])
+                           "macd_hist": 0.1, "volume": 1000.}])
     ledger = PositionLedger(date(2026, 9, 24), core_shares=600, t_shares=200,
                             bought_t_today=200)
     assert decision.decide(frame, position=ledger)["sellable_shares"] == 600

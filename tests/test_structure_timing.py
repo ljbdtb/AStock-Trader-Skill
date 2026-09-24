@@ -72,7 +72,8 @@ def test_future_mutation_cannot_change_as_of_structure():
 def test_breakout_reference_was_available_before_breakout_bar():
     df = bars([1, 2, 5, 2, 1, 2, 7], closes=[0.5, 1, 4, 1, 0.5, 1, 6])
     feature = structure_features(df, as_of=6)
-    assert feature["breakout"]
+    assert feature["breakout_status"] == "BREAKOUT_ATTEMPT"
+    assert not feature["breakout"]
     assert feature["prev_high"] == 5
     assert feature["breakout_reference_index"] == 2
     assert feature["breakout_reference_available_index"] < 6
