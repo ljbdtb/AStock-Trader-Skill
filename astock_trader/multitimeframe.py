@@ -12,7 +12,7 @@ def timeframe_snapshot(df):
     }
 
 def alignment(frames):
-    if not frames: return 0.5
+    if not frames: return 0.0
     votes=[]
     for x in frames.values():
         votes.append(x["close"]>x["ema20"] and x["macd_positive"])
