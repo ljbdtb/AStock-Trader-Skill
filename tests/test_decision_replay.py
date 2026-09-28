@@ -137,7 +137,8 @@ def test_local_bundle_loads_canonical_files_and_records_provenance(tmp_path):
             "1": "1m.csv", "5": "5m.csv", "15": "15m.csv",
             "daily_stock": "daily_stock.csv", "daily_csi300": "daily_csi300.csv",
         }[timeframe]
-        assert record["source_file"].endswith(expected_file)
+        assert record["source_file"] == f"002475/{expected_file}"
+        assert str(tmp_path) not in record["source_file"]
 
 
 @pytest.mark.parametrize(
@@ -191,3 +192,21 @@ def test_replay_trace_integrity_audit_passes_current_snapshot():
     )[0]
 
     assert decision_replay._trace_failures(trace) == []
+
+
+def test_local_acceptance_runs_replay_and_keeps_fixture_incomplete(tmp_path):
+    _write_bundle(tmp_path / "002475")
+
+    report = decision_replay.run_local_data_acceptance(
+        tmp_path, symbols={"002475": "立讯精密"}, max_samples=4
+    )
+
+    asset = report["assets"][0]
+    assert asset["trace_count"] == 4
+    assert asset["causality_checks"] == 3
+    assert set(asset["source_metadata"]) == {
+        "1", "5", "15", "daily_stock", "daily_csi300"
+    }
+    assert report["usable_symbols"] == 0
+    assert report["eligible_real_symbols"] == 0
+    assert report["REAL_DATA_ACCEPTANCE"] == "INCOMPLETE"

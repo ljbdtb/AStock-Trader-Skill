@@ -331,9 +331,7 @@ def _finalize_acceptance(report):
             for asset in assets
         ],
         "provider_failures": sum(
-            any("provider" in str(error).lower() or "remote" in str(error).lower()
-                for error in asset.get("errors", []))
-            for asset in assets
+            int(asset.get("provider_failures", 0)) for asset in assets
         ),
         "schema_failures": schema_failures,
         "causality_failures": causal_failures,
@@ -372,7 +370,7 @@ def run_local_data_acceptance(input_dir, symbols=None, max_samples=120,
             "symbol": str(symbol), "name": name, "source_type": "LOCAL_FIXTURE",
             "data_origin": data_origin, "status": "FAIL", "errors": [],
             "schema_failures": [], "causality_failures": [],
-            "decision_trace_failures": [],
+            "decision_trace_failures": [], "provider_failures": 0,
         }
         try:
             frames, stock_daily, benchmark_daily, source_metadata = load_local_symbol(
@@ -611,13 +609,17 @@ def run_real_data_acceptance(symbols=None, max_samples=120, sample_sleep=0.0):
             "symbol": str(symbol), "name": name, "source_type": "LIVE_PROVIDER",
             "data_origin": "LIVE_PROVIDER", "status": "FAIL", "errors": [],
             "schema_failures": [], "causality_failures": [],
-            "decision_trace_failures": [],
+            "decision_trace_failures": [], "provider_failures": 0,
         }
         try:
             frames, provider_meta = fetch_frames(symbol, periods=("1", "5", "15"))
             missing_periods = {"1", "5", "15"} - set(frames)
             if missing_periods:
-                raise ValueError(f"missing required timeframe data: {sorted(missing_periods)}")
+                asset["provider_failures"] = 1
+                raise RuntimeError(
+                    f"provider omitted required timeframe data {sorted(missing_periods)}; "
+                    f"provider results: {provider_meta}"
+                )
             frames = {
                 period: _validate_market_frame(frames[period], period)
                 for period in ("1", "5", "15")
@@ -676,8 +678,10 @@ def run_real_data_acceptance(symbols=None, max_samples=120, sample_sleep=0.0):
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
             asset["errors"].append(message)
-            if str(exc).startswith(("1:", "5:", "15:", "daily_stock:", "daily_csi300:")):
+            if str(exc).startswith(("1:", "5:", "15:", "1m:", "5m:", "15m:", "daily_stock:", "daily_csi300:")):
                 asset["schema_failures"].append(message)
+            elif not asset.get("source_metadata"):
+                asset["provider_failures"] = max(asset.get("provider_failures", 0), 1)
         report["assets"].append(asset)
     report = _finalize_acceptance(report)
     report["loaded_assets"] = sum(asset["status"] == "PASS" for asset in report["assets"])
