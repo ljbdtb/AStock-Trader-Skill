@@ -146,7 +146,7 @@ def replay_decisions(symbol, frames, stock_daily, benchmark_daily, decision_time
         complete_mtf = set(timeframe_views) == {"1", "5", "15"}
         mtf_alignment = alignment(timeframe_views) if complete_mtf else 0.0
         mtf_timestamps = {
-            period: pd.Timestamp(visible[period]["time"].iloc[-1]).isoformat()
+            period: _aware(visible[period]["time"].iloc[-1]).isoformat()
             for period in timeframe_views
         }
         rs = relative_strength(
