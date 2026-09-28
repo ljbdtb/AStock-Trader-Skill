@@ -14,11 +14,22 @@ def render_card(result):
     reason_codes=result.get("risk_reason_codes") or []
     reason=('结构失效确认' if "STRUCTURE_INVALIDATED" in reason_codes
             else ", ".join(reason_codes))
+    evidence=[]
+    if "mtf_alignment" in result:
+        evidence.append(f'多周期一致性: {result["mtf_alignment"]:.0%} | {result.get("mtf_status","UNKNOWN")}')
+    relative=result.get("relative_strength")
+    if isinstance(relative,dict):
+        if relative.get("status")=="PASS":
+            periods=" | ".join(f'{key.upper()} {relative[key]:+.2%}' for key in ("1d","5d","20d"))
+            evidence.append(f'相对沪深300价格指数 ({relative["as_of"]}): {periods}')
+        else:
+            evidence.append(f'相对沪深300: {relative.get("status","UNAVAILABLE")}')
     lines = [
         f'{result["symbol"]} | {result["price"]:.2f}',
         '决策辅助建议（非委托）',
         f'状态: {result["regime"]} | 评分: {result["score"]}/100',
         f'结构: {result.get("structure", "未知")}',
+        *evidence,
         f'核心动作: {action_text} | T仓动作: {result.get("t_action","WAIT")}',
         *([f'原因: {reason}'] if reason else []),
         *limits,
