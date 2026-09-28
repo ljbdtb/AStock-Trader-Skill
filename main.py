@@ -26,6 +26,9 @@ def position_from_args(args):
         raise ValueError("--shares does not match core_shares + t_shares")
     return position
 
+def decision_data_ok(ready, frames, metas):
+    return "5" in ready and market_data_quality(frames["5"], metas.get("5"))
+
 def main():
     p=argparse.ArgumentParser(); p.add_argument("symbol")
     p.add_argument("--cost",type=float); p.add_argument("--shares",type=int)
@@ -41,21 +44,30 @@ def main():
     if not ready: raise RuntimeError("No usable market data")
     base=ready["5"] if "5" in ready else next(iter(ready.values()))
     snaps={k:timeframe_snapshot(v) for k,v in frames.items() if len(v)>=25}
-    data_ok=("5" in ready and market_data_quality(frames["5"],metas.get("5")))
+    data_ok=decision_data_ok(ready,frames,metas)
     current_position=(position if position is not None and "5" in ready
                       and position.trading_date==frames["5"].time.iloc[-1].date()
                       else None)
+    store=StateStore(a.state_file); prev=store.get(a.symbol)
+    previous_risk=({"active":prev.risk_active,
+                    "reference_level":prev.risk_reference_level,
+                    "reference_type":prev.risk_reference_type,
+                    "invalidation_level":prev.risk_invalidation_level}
+                   if prev is not None else None)
     out=decide(base,a.portfolio_weight,alignment(snaps),position=current_position,
-               data_ok=data_ok)
+               data_ok=data_ok,previous_risk=previous_risk)
     meta=metas.get("5") or next(iter(metas.values()))
     out.update({"symbol":a.symbol,"cost":a.cost,"shares":a.shares,
       "data_time":meta.get("data_time"),"provider":meta.get("provider"),"timeframes":list(ready)})
-    store=StateStore(a.state_file); prev=store.get(a.symbol)
     changed=materially_changed(prev,out)
     out["changed"]=changed
     if not changed: out["status_message"]="维持上一判断"
     store.put(AnalysisState(a.symbol,out["regime"],out["action"],out.get("t_action"),
-                            out["score"],out["support"],out["resistance"],out.get("data_time")))
+                            out["score"],out["support"],out["resistance"],out.get("data_time"),
+                            out["risk_active"],out["structural_reference_level"],
+                            out["structural_reference_type"],
+                            out["structural_invalidation_level"],
+                            out["risk_status"]))
     if a.json: print(json.dumps(out,ensure_ascii=False,indent=2))
     elif not changed: print(f'{a.symbol} | {out["price"]:.2f}\n维持上一判断 | {out["action"]} | T仓 {out.get("t_action","WAIT")}')
     else: print(render_card(out))

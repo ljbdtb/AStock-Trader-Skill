@@ -13,6 +13,11 @@ class AnalysisState:
     support:float|None=None
     resistance:float|None=None
     data_time:str|None=None
+    risk_active:bool=False
+    risk_reference_level:float|None=None
+    risk_reference_type:str|None=None
+    risk_invalidation_level:float|None=None
+    risk_status:str|None=None
 
 class StateStore:
     def __init__(self,path=".astock_state.json"):
@@ -31,4 +36,7 @@ class StateStore:
 def materially_changed(prev,current,score_delta=5):
     if prev is None: return True
     if prev.regime!=current["regime"] or prev.action!=current["action"] or prev.t_action!=current.get("t_action"): return True
+    if prev.risk_active!=current.get("risk_active",False) or prev.risk_status!=current.get("risk_status"): return True
+    if (prev.risk_reference_level!=current.get("structural_reference_level")
+            or prev.risk_invalidation_level!=current.get("structural_invalidation_level")): return True
     return abs((prev.score or 0)-current["score"])>=score_delta

@@ -17,6 +17,7 @@ indicators:
 risk:
   concentration_limit: 0.50
   atr_stop_multiple: 1.5
+  structural_atr_buffer: 0.25
   max_t_fraction: 0.25
 signals:
   breakout_lookback: 20
