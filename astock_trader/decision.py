@@ -1,12 +1,13 @@
 from .regime import classify
-from .scoring import score
+from .scoring import score,score_components
 from .risk import gate_decision,structural_invalidation
 from .structure import structure_snapshot
 from .trading_rules import t_signal
 
 def decide(df,portfolio_weight=None,mtf_alignment=0.5,relative_strength=None,
-           position=None,data_ok=False,previous_risk=None):
-    row=df.iloc[-1]; f=structure_snapshot(df)
+           position=None,data_ok=False,previous_risk=None,snapshot=None):
+    row=df.iloc[-1]; f=snapshot if snapshot is not None else structure_snapshot(df)
+    components=score_components(df,mtf_alignment,relative_strength,snapshot=f)
     regime=classify(df,snapshot=f)
     points=score(df,mtf_alignment,relative_strength,snapshot=f)
     if regime in {"BREAKOUT","STRONG_UPTREND"} and points>=70: action="HOLD"
@@ -39,7 +40,8 @@ def decide(df,portfolio_weight=None,mtf_alignment=0.5,relative_strength=None,
             risk_codes.append("REDUCE_LIMITED_BY_T1")
     support=f["support"] if f["support"] is not None else float(row.low)
     resistance=f["resistance"] if f["resistance"] is not None else float(row.high)
-    return {"price":round(float(row.close),3),"regime":regime,"score":points,"action":action,
+    return {"price":round(float(row.close),3),"regime":regime,"score":points,
+      "score_components":components,"action":action,
       "t_action":t_action,"structure":f'{f["high_state"]}/{f["low_state"]}',
       "structure_bias":f["bias"],"support":round(float(support),3),
       "resistance":round(float(resistance),3),
