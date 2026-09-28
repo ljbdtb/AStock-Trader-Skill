@@ -1,0 +1,35 @@
+name: real-data-decision-replay
+
+on:
+  push:
+    branches:
+      - research/e2e-acceptance
+    paths:
+      - "astock_trader/**"
+      - "backtest/decision_replay.py"
+      - "tests/**"
+      - ".github/workflows/real-data-decision-replay.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - run: pip install -r requirements.txt
+      - name: Replay public market data across the fixed symbol set
+        run: python -m backtest.decision_replay --output decision-replay-report.json --max-samples 120
+      - name: Upload replay report even when the provider fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: decision-replay-report
+          path: decision-replay-report.json
+          if-no-files-found: warn
