@@ -37,4 +37,26 @@ python main.py 002475 --trading-date YYYY-MM-DD --core-shares 2000 --t-shares 20
 
 Check the data timestamp, quality result, risk reason codes and current position state before interpreting a recommendation. Provider data may be delayed or unavailable. Passing tests does not establish out-of-sample trading advantage or suitability for autonomous real-money decisions.
 
+## Local historical-data acceptance
+
+When the public provider is unreachable, save a per-symbol bundle and replay it through the same decision path:
+
+```
+acceptance-data/
+  002475/
+    1m.csv
+    5m.csv
+    15m.csv
+    daily_stock.csv
+    daily_csi300.csv
+```
+
+Intraday CSVs require `time,open,high,low,close,volume`; daily files require `date,close`. Timestamps must be unique and already sorted, and OHLC values must be internally valid. Parquet files with the same stems are also accepted when a parquet engine is installed. Do not mix CSV and Parquet for the same stem.
+
+```bash
+python -m backtest.decision_replay --input-dir ./acceptance-data --output decision-replay-report.json --max-samples 120
+```
+
+Local files default to `SYNTHETIC_FIXTURE`, so synthetic tests cannot pass real-data acceptance. For an independently sourced real-history bundle, explicitly attest its origin with `--input-origin REAL_HISTORICAL`. This is only a user-provided label; the tool records checksums and provenance fields but cannot authenticate where the data came from. Acceptance still requires at least three symbols with 30 or more decisions each, more than one observed regime, and zero schema, causality, and decision-trace failures. An incomplete result must not be treated as Phase 1 PASS.
+
 See [SKILL.md](SKILL.md) and [config/strategy.yaml](config/strategy.yaml).
