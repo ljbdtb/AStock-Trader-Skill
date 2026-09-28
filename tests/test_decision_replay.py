@@ -37,14 +37,12 @@ def test_replay_trace_is_causal_and_future_mutation_invariant():
     changed = {key: frame.copy() for key, frame in frames.items()}
     for key, frame in changed.items():
         step = 1 if key == "1" else int(key)
-        future = frame.iloc[-1].copy()
-        future["time"] = frame.time.iloc[-1] + pd.Timedelta(minutes=step)
-        future["open"] = 500
-        future["high"] = 600
-        future["low"] = 400
-        future["close"] = 550
-        future["volume"] = 10**9
-        changed[key] = pd.concat([frame, future.to_frame().T], ignore_index=True)
+        future = pd.DataFrame({
+            "time": [frame.time.iloc[-1] + pd.Timedelta(minutes=step)],
+            "open": [500.0], "high": [600.0], "low": [400.0],
+            "close": [550.0], "volume": [float(10**9)],
+        })
+        changed[key] = pd.concat([frame, future], ignore_index=True)
     future_stock = pd.concat([
         stock, pd.DataFrame({"date": [pd.Timestamp(target).normalize()],
                              "close": [99999]})
