@@ -95,3 +95,46 @@ def test_decision_does_not_add_extra_structure_bonus(monkeypatch):
     out = decision.decide(_frame(), data_ok=False)
     assert out["score"] == 70
     assert out["action"] == "WAIT"
+
+
+def test_daily_provider_uses_qfq_stock_and_price_index(monkeypatch):
+    import akshare as ak
+    from astock_trader.relative_strength import fetch_relative_strength
+
+    calls = {}
+    dates = pd.date_range("2026-08-03", periods=22, freq="B")
+    stock = pd.DataFrame({"日期": dates, "收盘": [100.0] * 21 + [110.0]})
+    benchmark = pd.DataFrame({"日期": dates, "收盘": [100.0] * 22})
+
+    def stock_provider(**kwargs):
+        calls["stock"] = kwargs
+        return stock
+
+    def index_provider(**kwargs):
+        calls["index"] = kwargs
+        return benchmark
+
+    monkeypatch.setattr(ak, "stock_zh_a_hist", stock_provider)
+    monkeypatch.setattr(ak, "stock_zh_index_daily", index_provider)
+    result = fetch_relative_strength("002475", date(2026, 9, 2))
+    assert result["status"] == "PASS"
+    assert calls["stock"]["adjust"] == "qfq"
+    assert calls["index"]["symbol"] == "sh000300"
+
+
+def test_card_displays_evidence_dates_and_missing_state():
+    from astock_trader.card import render_card
+
+    base = {"symbol": "002475", "price": 10.0, "regime": "RANGE",
+            "structure": "EH/EL", "score": 50, "action": "WAIT",
+            "t_action": "WAIT", "resistance": 10.2, "support": 9.8,
+            "data_quality": "PASS", "mtf_alignment": 2 / 3,
+            "mtf_status": "PASS",
+            "relative_strength": {"status": "PASS", "as_of": "2026-09-01",
+                                  "1d": 0.01, "5d": -0.02, "20d": 0.03}}
+    card = render_card(base)
+    assert "2026-09-01" in card
+    assert "多周期" in card
+    assert "1D +1.00%" in card
+    base["relative_strength"] = {"status": "UNAVAILABLE"}
+    assert "UNAVAILABLE" in render_card(base)
