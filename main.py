@@ -71,7 +71,9 @@ def main():
     meta=metas.get("5") or next(iter(metas.values()))
     out.update({"symbol":a.symbol,"cost":a.cost,"shares":a.shares,
       "data_time":meta.get("data_time"),"provider":meta.get("provider"),"timeframes":list(ready),
-      "mtf_alignment":mtf_alignment,"relative_strength":rs})
+      "mtf_alignment":mtf_alignment,
+      "mtf_status":"PASS" if set(snaps)=={"1","5","15"} else "INCOMPLETE",
+      "relative_strength":rs})
     changed=materially_changed(prev,out)
     out["changed"]=changed
     if not changed: out["status_message"]="维持上一判断"
