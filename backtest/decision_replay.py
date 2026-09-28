@@ -194,10 +194,20 @@ def load_local_symbol(directory, symbol, data_origin="SYNTHETIC_FIXTURE"):
     )
 
 
-def _sample_times(frame, max_samples):
+def _sample_times(frame, max_samples, frames=None):
     if max_samples < 1:
         raise ValueError("max_samples must be at least 1")
     times = pd.to_datetime(frame["time"])
+    if frames is not None:
+        ready_at, ends = [], []
+        for period in ("1", "5", "15"):
+            if period not in frames or len(frames[period]) < 25:
+                return []
+            period_times = pd.to_datetime(frames[period]["time"])
+            ready_at.append(period_times.iloc[24])
+            ends.append(period_times.iloc[-1])
+        start, end = max(ready_at), min(ends)
+        times = times[(times >= start) & (times <= end)]
     count = min(max_samples, len(times))
     indices = np.linspace(0, len(times) - 1, count, dtype=int) if count else []
     return times.iloc[indices].tolist()
@@ -209,6 +219,8 @@ def _trace_failures(trace):
     if not isinstance(components, dict) or sum(components.values()) != trace.get("score_total"):
         failures.append("SCORE_COMPONENT_SUM")
     cutoff = pd.Timestamp(trace["timestamp"])
+    if trace.get("data_quality") == "PASS" and trace.get("mtf", {}).get("status") != "PASS":
+        failures.append("MTF_INCOMPLETE")
     for period, stamp in trace.get("mtf", {}).get("source_timestamps", {}).items():
         if pd.Timestamp(stamp) > cutoff:
             failures.append(f"MTF_FUTURE_BAR_{period}")
@@ -308,6 +320,7 @@ def _finalize_acceptance(report):
     schema_failures = sum(len(asset.get("schema_failures", [])) for asset in assets)
     causal_failures = sum(len(asset.get("causality_failures", [])) for asset in assets)
     trace_failures = sum(len(asset.get("decision_trace_failures", [])) for asset in assets)
+    mtf_incomplete = sum(asset.get("mtf_incomplete_decisions", 0) for asset in assets)
     genuine_usable = [
         asset for asset in usable
         if asset.get("data_origin") == "REAL_HISTORICAL"
@@ -317,6 +330,7 @@ def _finalize_acceptance(report):
     status = (
         "PASS" if len(genuine_usable) >= 3 and len(regimes) > 1
         and schema_failures == 0 and causal_failures == 0 and trace_failures == 0
+        and mtf_incomplete == 0
         else "INCOMPLETE"
     )
     report.update({
@@ -336,6 +350,7 @@ def _finalize_acceptance(report):
         "schema_failures": schema_failures,
         "causality_failures": causal_failures,
         "decision_trace_failures": trace_failures,
+        "mtf_incomplete_decisions": mtf_incomplete,
         "REAL_DATA_ACCEPTANCE": status,
         "phase1_status": status,
         "scenario_coverage": sorted({
@@ -377,7 +392,7 @@ def run_local_data_acceptance(input_dir, symbols=None, max_samples=120,
                 root / str(symbol), symbol, data_origin=data_origin
             )
             asset["source_metadata"] = source_metadata
-            decision_times = _sample_times(frames["5"], max_samples)
+            decision_times = _sample_times(frames["5"], max_samples, frames=frames)
             traces = replay_decisions(
                 symbol, frames, stock_daily, benchmark_daily,
                 decision_times=decision_times,
@@ -390,6 +405,12 @@ def run_local_data_acceptance(input_dir, symbols=None, max_samples=120,
             asset["scenario_coverage"] = sorted({
                 tag for trace in traces for tag in trace.get("scenario_tags", [])
             })
+            asset["mtf_incomplete_decisions"] = sum(
+                trace.get("mtf", {}).get("status") != "PASS" for trace in traces
+            )
+            asset["mtf_incomplete_decisions"] = sum(
+                trace.get("mtf", {}).get("status") != "PASS" for trace in traces
+            )
             asset["causality_checks"] = min(3, len(decision_times))
             asset["causality_failures"] = _causality_failures(
                 symbol, frames, stock_daily, benchmark_daily, decision_times
@@ -649,7 +670,7 @@ def run_real_data_acceptance(symbols=None, max_samples=120, sample_sleep=0.0):
                 provider="AKShare", data_origin="LIVE_PROVIDER",
             )
             asset["source_metadata"] = source_metadata
-            decision_times = _sample_times(frames["5"], max_samples)
+            decision_times = _sample_times(frames["5"], max_samples, frames=frames)
             traces = replay_decisions(
                 symbol, frames, stock_clean, benchmark_clean,
                 decision_times=decision_times,
@@ -686,6 +707,143 @@ def run_real_data_acceptance(symbols=None, max_samples=120, sample_sleep=0.0):
     report = _finalize_acceptance(report)
     report["loaded_assets"] = sum(asset["status"] == "PASS" for asset in report["assets"])
     return report
+
+
+
+def collect_acceptance_data(output_dir, symbols, fetch_frames_fn=None,
+                            fetch_daily_fn=None):
+    """Fetch real provider bars to canonical files; never synthesizes missing data."""
+    if fetch_frames_fn is None:
+        fetch_frames_fn = fetch_frames
+    if fetch_daily_fn is None:
+        fetch_daily_fn = fetch_daily_inputs
+    root = Path(output_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    result = {
+        "source_type": "LIVE_PROVIDER", "provider": "AKShare/Eastmoney",
+        "generated_at": datetime.now().astimezone().isoformat(),
+        "assets": [],
+    }
+    for symbol, name in symbols.items():
+        asset = {"symbol": str(symbol), "name": name, "status": "FAIL", "errors": []}
+        try:
+            frames, provider_meta = fetch_frames_fn(symbol, periods=("1", "5", "15"))
+            missing = {"1", "5", "15"} - set(frames)
+            if missing:
+                raise RuntimeError(
+                    f"provider omitted periods {sorted(missing)}; details={provider_meta}"
+                )
+            clean_frames = {
+                period: _validate_market_frame(frames[period], period)
+                for period in ("1", "5", "15")
+            }
+            latest = pd.Timestamp(clean_frames["5"]["time"].iloc[-1]).date()
+            stock_daily, benchmark_daily = fetch_daily_fn(symbol, latest)
+            stock_daily = stock_daily.rename(columns={"日期": "date", "收盘": "close"})
+            clean_daily = {
+                "daily_stock": _validate_market_frame(stock_daily, "daily_stock"),
+                "daily_csi300": _validate_market_frame(benchmark_daily, "daily_csi300"),
+            }
+            output_frames = {
+                "1m": clean_frames["1"][["time", "open", "high", "low", "close", "volume"]],
+                "5m": clean_frames["5"][["time", "open", "high", "low", "close", "volume"]],
+                "15m": clean_frames["15"][["time", "open", "high", "low", "close", "volume"]],
+                "daily_stock": clean_daily["daily_stock"][["date", "close"]],
+                "daily_csi300": clean_daily["daily_csi300"][["date", "close"]],
+            }
+            target = root / str(symbol)
+            if target.exists() and any(target.iterdir()):
+                raise FileExistsError(
+                    f"{target} already contains files; choose a new output directory"
+                )
+            target.mkdir(parents=True, exist_ok=True)
+            metadata = {}
+            for timeframe, frame in output_frames.items():
+                path = target / f"{timeframe}.csv"
+                payload = frame.to_csv(index=False, lineterminator="\n").encode("utf-8")
+                path.write_bytes(payload)
+                metadata[timeframe] = _source_metadata(
+                    frame, "LIVE_PROVIDER", f"{symbol}/{path.name}", symbol,
+                    timeframe if timeframe.startswith("daily_") else timeframe[:-1],
+                    checksum=hashlib.sha256(payload).hexdigest(),
+                    provider="AKShare/Eastmoney", data_origin="REAL_HISTORICAL",
+                )
+                metadata[timeframe]["fetched_at"] = datetime.now().astimezone().isoformat()
+            asset["source_metadata"] = metadata
+            asset["provider_metadata"] = provider_meta
+            asset["status"] = "PASS"
+        except Exception as exc:
+            asset["errors"].append(f"{type(exc).__name__}: {exc}")
+        result["assets"].append(asset)
+
+    manifest_path = root / "collection-manifest.json"
+    manifest_path.write_text(
+        json.dumps(_as_json(result), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return result
+
+
+def collect_and_replay(output_dir, symbols, max_samples=120,
+                       report_path="decision-replay-report.json",
+                       fetch_frames_fn=None, fetch_daily_fn=None):
+    collection = collect_acceptance_data(
+        output_dir, symbols, fetch_frames_fn=fetch_frames_fn,
+        fetch_daily_fn=fetch_daily_fn,
+    )
+    collected = {
+        asset["symbol"]: asset["name"] for asset in collection["assets"]
+        if asset["status"] == "PASS"
+    }
+    if collected:
+        report = run_local_data_acceptance(
+            output_dir, symbols=collected, max_samples=max_samples,
+            data_origin="REAL_HISTORICAL",
+        )
+    else:
+        report = _finalize_acceptance({
+            "purpose": "software and semantic acceptance only; not OOS performance",
+            "input_mode": "LOCAL_FILES_FROM_LIVE_PROVIDER", "assets": [],
+        })
+    collection_failures = sum(asset["status"] != "PASS" for asset in collection["assets"])
+    report["provider_failures"] = report.get("provider_failures", 0) + collection_failures
+    report["collection_failures"] = collection_failures
+    report["collection"] = collection
+    Path(report_path).write_text(
+        json.dumps(_as_json(report), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return report
+
+
+def collection_main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output-dir", default="acceptance-data")
+    parser.add_argument("--report-output", default="decision-replay-report.json")
+    parser.add_argument("--max-samples", type=int, default=120)
+    parser.add_argument("--symbols", nargs="*", default=list(REAL_DATA_UNIVERSE),
+                        choices=list(REAL_DATA_UNIVERSE))
+    args = parser.parse_args()
+    symbols = {code: REAL_DATA_UNIVERSE[code] for code in args.symbols}
+    report = collect_and_replay(
+        args.output_dir, symbols, max_samples=args.max_samples,
+        report_path=args.report_output,
+    )
+    print(json.dumps({
+        "REAL_DATA_ACCEPTANCE": report.get("REAL_DATA_ACCEPTANCE"),
+        "usable_symbols": report.get("usable_symbols", 0),
+        "eligible_real_symbols": report.get("eligible_real_symbols", 0),
+        "total_decisions": report.get("total_decisions", 0),
+        "regimes_seen": report.get("regimes_seen", []),
+        "provider_failures": report.get("provider_failures", 0),
+        "schema_failures": report.get("schema_failures", 0),
+        "causality_failures": report.get("causality_failures", 0),
+        "decision_trace_failures": report.get("decision_trace_failures", 0),
+        "mtf_incomplete_decisions": report.get("mtf_incomplete_decisions", 0),
+        "collection_failures": report.get("collection_failures", 0),
+    }, ensure_ascii=False))
+    print(f"REPORT_PATH={args.report_output}")
+    if report.get("REAL_DATA_ACCEPTANCE") != "PASS":
+        raise SystemExit("REAL_DATA_ACCEPTANCE is INCOMPLETE; inspect report and provider data")
+
 
 
 def main():

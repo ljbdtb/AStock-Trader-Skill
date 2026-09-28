@@ -39,7 +39,15 @@ Check the data timestamp, quality result, risk reason codes and current position
 
 ## Local historical-data acceptance
 
-When the public provider is unreachable, save a per-symbol bundle and replay it through the same decision path:
+When the public provider is reachable from your local machine, collect the files and run the acceptance replay in one step:
+
+```bash
+python -m backtest.collect_acceptance_data --output-dir ./acceptance-data --symbols 002475 002594 300750 --report-output decision-replay-report.json --max-samples 120
+```
+
+This downloads 1m/5m/15m plus daily stock and CSI300 data via AKShare/Eastmoney, writes a collection manifest with per-file checksums, and invokes the same local replay path. It samples only the timestamp overlap where all three intraday timeframes have enough warm-up bars. If the provider fails or acceptance gates do not pass, the report is still written with `REAL_DATA_ACCEPTANCE: INCOMPLETE`; the command exits nonzero. It does not overwrite a non-empty symbol folder—choose a new output directory for a fresh collection.
+
+If you already have a data bundle, it should use this layout:
 
 ```
 acceptance-data/

@@ -210,3 +210,62 @@ def test_local_acceptance_runs_replay_and_keeps_fixture_incomplete(tmp_path):
     assert report["usable_symbols"] == 0
     assert report["eligible_real_symbols"] == 0
     assert report["REAL_DATA_ACCEPTANCE"] == "INCOMPLETE"
+
+
+def test_sample_times_only_uses_complete_mtf_overlap():
+    frames, _, _ = _inputs()
+
+    samples = decision_replay._sample_times(
+        frames["5"], max_samples=5, frames=frames
+    )
+
+    assert len(samples) == 5
+    latest_overlap = min(pd.to_datetime(frame.time).iloc[-1] for frame in frames.values())
+    first_ready = max(pd.to_datetime(frame.time).iloc[24] for frame in frames.values())
+    assert all(first_ready <= pd.Timestamp(stamp) <= latest_overlap for stamp in samples)
+    for stamp in samples:
+        assert all((pd.to_datetime(frame.time) <= stamp).sum() >= 25
+                   for frame in frames.values())
+
+
+def test_collector_persists_only_validated_provider_bundles_and_provenance(tmp_path):
+    frames, stock, benchmark = _inputs()
+
+    def fetch_frames(symbol, periods):
+        assert periods == ("1", "5", "15")
+        return frames, {period: {"provider": "fixture-mock"} for period in periods}
+
+    def fetch_daily(symbol, as_of):
+        return stock, benchmark
+
+    result = decision_replay.collect_acceptance_data(
+        tmp_path, {"002475": "立讯精密"},
+        fetch_frames_fn=fetch_frames, fetch_daily_fn=fetch_daily,
+    )
+
+    asset = result["assets"][0]
+    assert asset["status"] == "PASS"
+    assert set(asset["source_metadata"]) == {
+        "1m", "5m", "15m", "daily_stock", "daily_csi300"
+    }
+    assert asset["source_metadata"]["1m"]["source_type"] == "LIVE_PROVIDER"
+    assert asset["source_metadata"]["1m"]["source_file"] == "002475/1m.csv"
+    assert (tmp_path / "collection-manifest.json").exists()
+    for filename in ("1m.csv", "5m.csv", "15m.csv",
+                     "daily_stock.csv", "daily_csi300.csv"):
+        assert (tmp_path / "002475" / filename).is_file()
+
+
+def test_collector_does_not_write_a_partial_symbol_bundle(tmp_path):
+    frames, _, _ = _inputs()
+
+    result = decision_replay.collect_acceptance_data(
+        tmp_path, {"002475": "立讯精密"},
+        fetch_frames_fn=lambda symbol, periods: (
+            {"5": frames["5"]}, {"1": {"error": "source unavailable"}}
+        ),
+        fetch_daily_fn=lambda symbol, as_of: (None, None),
+    )
+
+    assert result["assets"][0]["status"] == "FAIL"
+    assert not (tmp_path / "002475").exists()
