@@ -45,7 +45,10 @@ def relative_strength(stock_daily, benchmark_daily, as_of):
                          suffixes=("_stock", "_benchmark"), validate="one_to_one")
     if len(common) <= max(HORIZONS):
         return {"status": "INSUFFICIENT_HISTORY", "common_sessions": len(common)}
-    result = {"status": "PASS", "as_of": common["date"].iloc[-1].date().isoformat(),
+    last_date = common["date"].iloc[-1].date()
+    if (as_of - last_date).days > 7:
+        return {"status": "STALE", "as_of": last_date.isoformat()}
+    result = {"status": "PASS", "as_of": last_date.isoformat(),
               "benchmark": "CSI300_PRICE_INDEX", "common_sessions": len(common)}
     for horizon in HORIZONS:
         stock_return = common["close_stock"].iloc[-1] / common["close_stock"].iloc[-1-horizon] - 1
