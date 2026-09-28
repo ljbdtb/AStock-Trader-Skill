@@ -4,13 +4,11 @@ from .risk import gate_decision,structural_invalidation
 from .structure import structure_snapshot
 from .trading_rules import t_signal
 
-def decide(df,portfolio_weight=None,mtf_alignment=0.5,relative_strength=0.5,
+def decide(df,portfolio_weight=None,mtf_alignment=0.5,relative_strength=None,
            position=None,data_ok=False,previous_risk=None):
     row=df.iloc[-1]; f=structure_snapshot(df)
     regime=classify(df,snapshot=f)
     points=score(df,mtf_alignment,relative_strength,snapshot=f)
-    if f["bias"]=="BULLISH": points=min(100,points+5)
-    elif f["bias"]=="BEARISH": points=max(0,points-5)
     if regime in {"BREAKOUT","STRONG_UPTREND"} and points>=70: action="HOLD"
     elif regime in {"DOWNTREND","FALSE_BREAKOUT"} and points<45: action="REDUCE"
     else: action="WAIT"
