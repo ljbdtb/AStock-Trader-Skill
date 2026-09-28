@@ -288,8 +288,9 @@ def run_real_data_acceptance(symbols=None, max_samples=120, sample_sleep=0.0):
         asset = {"symbol": symbol, "name": name, "status": "FAIL", "errors": []}
         try:
             frames, metas = fetch_frames(symbol, periods=("1", "5", "15"))
+            asset["source_metadata"] = metas
             if "5" not in frames or frames["5"].empty:
-                raise RuntimeError("no usable 5-minute history")
+                raise RuntimeError(f"no usable 5-minute history; provider results: {metas}")
             last_date = pd.Timestamp(frames["5"]["time"].iloc[-1]).date()
             daily_stock, daily_benchmark = fetch_daily_inputs(symbol, last_date)
             times = pd.to_datetime(frames["5"]["time"])
