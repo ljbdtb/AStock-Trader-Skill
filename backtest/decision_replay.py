@@ -343,9 +343,16 @@ def main():
         encoding="utf-8",
     )
     print(json.dumps({
-        key: report[key] for key in (
-            "loaded_assets", "scenario_coverage", "missing_scenarios", "phase1_status"
-        )
+        "loaded_assets": report["loaded_assets"],
+        "assets": [
+            {"symbol": item["symbol"], "status": item["status"],
+             "sample_count": item.get("sample_count", 0),
+             "errors": item["errors"]}
+            for item in report["assets"]
+        ],
+        "scenario_coverage": report["scenario_coverage"],
+        "missing_scenarios": report["missing_scenarios"],
+        "phase1_status": report["phase1_status"],
     }, ensure_ascii=False))
     print(f"REPORT_PATH={args.output}")
     if report["loaded_assets"] < 3:
