@@ -184,7 +184,7 @@ def load_local_symbol(directory, symbol, data_origin="SYNTHETIC_FIXTURE"):
         frame = _validate_market_frame(raw, timeframe)
         loaded[timeframe] = frame
         metadata[timeframe] = _source_metadata(
-            frame, "LOCAL_FIXTURE", path.as_posix(), symbol, timeframe,
+            frame, "LOCAL_FIXTURE", f"{symbol}/{path.name}", symbol, timeframe,
             checksum=hashlib.sha256(path.read_bytes()).hexdigest(),
             data_origin=data_origin,
         )

@@ -146,7 +146,7 @@ def test_local_bundle_loads_canonical_files_and_records_provenance(tmp_path):
         (lambda frame: pd.concat([frame, frame.iloc[[0]]], ignore_index=True),
          "duplicate time"),
         (lambda frame: frame.iloc[::-1].reset_index(drop=True),
-         "already sorted"),
+         "already be sorted"),
         (lambda frame: frame.assign(high=frame["low"] - 1),
          "OHLC relationship"),
         (lambda frame: frame.drop(columns=["volume"]),
