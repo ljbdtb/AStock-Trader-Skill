@@ -138,3 +138,9 @@ def test_card_displays_evidence_dates_and_missing_state():
     assert "1D +1.00%" in card
     base["relative_strength"] = {"status": "UNAVAILABLE"}
     assert "UNAVAILABLE" in render_card(base)
+
+
+def test_relative_strength_fails_closed_for_stale_common_history():
+    stock = _daily([100.0] * 22)
+    benchmark = _daily([100.0] * 22)
+    assert relative_strength(stock, benchmark, as_of=date(2026, 9, 15))["status"] == "STALE"
