@@ -2,6 +2,12 @@
 
 AStock-Trader-Skill is an A-share short-term/swing **decision-support engine, not an automated trading system**. It fetches market data, checks freshness, analyzes indicators, structure and regime, applies user-provided position and T+1 constraints, then displays recommendations. A person remains responsible for every trading decision and any execution.
 
+## Evidence model
+
+The fixed 100-point evidence budget comes from `config/strategy.yaml`: structure 25, trend 15, volume/price 15, VWAP 10, momentum 10, volatility 5, CSI300 relative strength 10, and 1/5/15-minute alignment 10. There is no extra Structure bonus in the decision layer. Missing relative-strength or incomplete multi-timeframe evidence earns no points; neither can override a risk gate. These component rules are research hypotheses, **not validated trading edges**.
+
+Relative strength is the stock's qfq-adjusted daily price return minus the CSI300 **price-index** return over 1, 5 and 20 common completed sessions. The intraday decision date is excluded from the daily calculation. This benchmark omits dividends, so the comparison is not a total-return or investable alpha estimate. The JSON and card show the as-of date or an unavailable status; do not present unavailable evidence as neutral or current.
+
 ## What it does
 
 - Market analysis, structure/regime classification, and evidence scoring.
