@@ -1,6 +1,7 @@
 import argparse,json
 from datetime import date
 from astock_trader.data import fetch_frames
+from astock_trader.relative_strength import fetch_relative_strength
 from astock_trader.indicators import add_indicators
 from astock_trader.multitimeframe import timeframe_snapshot,alignment
 from astock_trader.decision import decide
@@ -44,7 +45,16 @@ def main():
     ready={k:add_indicators(v) for k,v in frames.items() if len(v)>=25}
     if not ready: raise RuntimeError("No usable market data")
     base=ready["5"] if "5" in ready else next(iter(ready.values()))
-    snaps={k:timeframe_snapshot(v) for k,v in frames.items() if len(v)>=25}
+    # All evidence is as-of the latest usable 5-minute bar, never a later bar.
+    as_of_time=base.time.iloc[-1] if "time" in base else None
+    aligned={k:v[v.time<=as_of_time] if as_of_time is not None and "time" in v else v
+             for k,v in frames.items()}
+    snaps={k:timeframe_snapshot(v) for k,v in aligned.items() if len(v)>=25}
+    mtf_alignment=alignment(snaps) if set(snaps)=={"1","5","15"} else 0.0
+    try:
+        rs=fetch_relative_strength(a.symbol,as_of_time.date()) if as_of_time is not None else {"status":"UNAVAILABLE","reason":"missing intraday timestamp"}
+    except Exception as exc:
+        rs={"status":"UNAVAILABLE","reason":str(exc)}
     data_ok=decision_data_ok(ready,frames,metas)
     current_position=(position if position is not None and "5" in ready
                       and position.trading_date==frames["5"].time.iloc[-1].date()
@@ -55,11 +65,13 @@ def main():
                     "reference_type":prev.risk_reference_type,
                     "invalidation_level":prev.risk_invalidation_level}
                    if prev is not None else None)
-    out=decide(base,a.portfolio_weight,alignment(snaps),position=current_position,
+    out=decide(base,a.portfolio_weight,mtf_alignment,relative_strength=rs,
+               position=current_position,
                data_ok=data_ok,previous_risk=previous_risk)
     meta=metas.get("5") or next(iter(metas.values()))
     out.update({"symbol":a.symbol,"cost":a.cost,"shares":a.shares,
-      "data_time":meta.get("data_time"),"provider":meta.get("provider"),"timeframes":list(ready)})
+      "data_time":meta.get("data_time"),"provider":meta.get("provider"),"timeframes":list(ready),
+      "mtf_alignment":mtf_alignment,"relative_strength":rs})
     changed=materially_changed(prev,out)
     out["changed"]=changed
     if not changed: out["status_message"]="维持上一判断"
