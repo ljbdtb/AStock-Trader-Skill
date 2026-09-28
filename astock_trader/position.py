@@ -16,6 +16,11 @@ class Position:
 
 @dataclass
 class PositionLedger:
+    """User-provided or simulated position state for decision validation.
+
+    State transitions model hypothetical fills for tests/paper tracking only;
+    they do not place, execute, or confirm broker trades.
+    """
     trading_date: date
     core_shares: int = 0
     t_shares: int = 0
@@ -77,6 +82,7 @@ class PositionLedger:
         return self.sold_core_today + self.sold_t_today
 
     def sell_core(self, shares):
+        """Simulate a core sale in the decision-constraint state."""
         if not isinstance(shares, int) or isinstance(shares, bool) or shares <= 0:
             raise ValueError("sale quantity must be a positive integer")
         if shares > self.sellable_core_shares:
@@ -86,6 +92,7 @@ class PositionLedger:
         self._validate()
 
     def sell_t(self, shares):
+        """Simulate a T-position sale; never send an order."""
         if not isinstance(shares, int) or isinstance(shares, bool) or shares <= 0:
             raise ValueError("sale quantity must be a positive integer")
         if shares > self.sellable_t_shares:
@@ -95,6 +102,7 @@ class PositionLedger:
         self._validate()
 
     def buyback_t(self, shares):
+        """Simulate a T-position buyback; never send an order."""
         if not isinstance(shares, int) or isinstance(shares, bool) or shares <= 0:
             raise ValueError("buyback quantity must be a positive integer")
         if shares > self.buyback_remaining:
@@ -105,6 +113,7 @@ class PositionLedger:
         self._validate()
 
     def rollover(self, next_trading_date):
+        """Advance hypothetical position state to a later trading date."""
         if next_trading_date <= self.trading_date:
             raise ValueError("trading date must advance")
         self.trading_date = next_trading_date

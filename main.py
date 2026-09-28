@@ -30,6 +30,7 @@ def decision_data_ok(ready, frames, metas):
     return "5" in ready and market_data_quality(frames["5"], metas.get("5"))
 
 def main():
+    """Fetch data and render decision support; never connect to a broker."""
     p=argparse.ArgumentParser(); p.add_argument("symbol")
     p.add_argument("--cost",type=float); p.add_argument("--shares",type=int)
     p.add_argument("--portfolio-weight",type=float); p.add_argument("--json",action="store_true")

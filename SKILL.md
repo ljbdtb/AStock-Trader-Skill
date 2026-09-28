@@ -1,59 +1,14 @@
 ---
 name: astock-trader
-description: Analyze A-share short-term price action using live/minute data, technical indicators, market regime, multi-factor scoring, position context and risk rules. Produce a compact decision card.
+description: Use when a user asks for A-share short-term or swing position analysis, such as whether to hold or reduce 002475, how to manage a T-position, or whether an existing position is sellable today.
 ---
 
-# AStock Trader Skill
+# AStock Trader decision support
 
-## Goal
-Given an A-share symbol and optional position context, fetch the freshest available data, compute indicators, classify the market regime, score the setup, apply risk constraints, and return a concise decision-support card.
+This skill gives **recommendations, not orders**. It never connects to a broker, places or cancels orders, confirms fills, or changes a real account. The human decides whether and how to act.
 
-## Required workflow
-1. Validate symbol and data timestamp.
-2. Fetch market data. Prefer AKShare; allow provider fallback.
-3. Never present stale/delayed data as exchange-level real-time data.
-4. Compute indicators from raw OHLCV; do not infer indicators from prose.
-5. Classify regime before interpreting overbought/oversold indicators.
-6. Compute the multi-factor score.
-7. Apply position/risk gates. Risk rules override technical signals.
-8. Emit one of: HOLD, WAIT, BUY_T, SELL_T, REDUCE.
-9. Always include invalidation conditions.
-10. If no meaningful state change occurred, say the previous decision remains valid rather than inventing a new trade.
+For a stock request, use this repository's `main.py` with the symbol and, when available, a complete user-provided position snapshot: trading date, core/T shares, same-day core/T buys, same-day T sales and buybacks; cost and portfolio weight are useful context. Do not infer holdings or today's transactions. For an account-specific question such as "can I sell now?", partial details (for example, only today's buys and T sales) do not establish sellable inventory: return `WAIT` on that question and do not give a quantity bound. Symbol-only market analysis may be described separately, clearly labeled as not position-specific. Read the JSON result so data quality, structure, risk reasons, and legal quantity upper bounds remain visible. If the data is stale, do not turn a `WAIT` into a buy or sell suggestion.
 
-## Regimes
-STRONG_UPTREND, UPTREND, RANGE, BREAKOUT, FALSE_BREAKOUT, REVERSAL, DOWNTREND.
+Interpret `HOLD`, `WAIT`, `SELL_T`, `BUYBACK_T`, and `REDUCE` as decision recommendations. `max_reducible_qty`, `max_sell_t_qty`, and `max_buyback_t_qty` are legal upper bounds under the provided state, **not recommended exact trade sizes**. A structural invalidation may override a high evidence score, but `REDUCE` means consider lowering core-position risk, not liquidate or sell all.
 
-## Default factor weights
-- price_structure: 25
-- trend: 15
-- volume_price: 15
-- vwap: 10
-- momentum: 10
-- volatility: 5
-- relative_strength: 10
-- multi_timeframe: 10
-
-## Risk rules
-- Never convert a high technical score into an automatic add-position instruction.
-- When portfolio concentration exceeds configured threshold, disable ADD_POSITION; only HOLD/WAIT/T/REDUCE are allowed.
-- Separate core position from T-position.
-- Structural invalidation and ATR-based stops have priority over oscillator signals.
-- RSI overbought alone is not a sell signal in an uptrend.
-- Main-fund-flow style vendor metrics are secondary evidence, never proof of institutional intent.
-
-## Compact output
-Default response should be compact:
-
-```text
-SYMBOL | PRICE | DATA_TIME
-REGIME: ...
-SCORE: ../100
-ACTION: ...
-RESISTANCE: ...
-SUPPORT: ...
-T: ...
-INVALIDATION: ...
-DATA: provider / delay-quality
-```
-
-Only provide a long explanation when explicitly requested.
+The analysis uses data quality, indicators, one causal Structure snapshot, regime, multi-timeframe evidence, score, T+1 position constraints and the recommendation safety gate. State the data timestamp, action, relevant support/resistance and invalidation level, risk reason, and any applicable upper bound. If no safe action is supported, say `WAIT` rather than inventing a trade. See `README.md` for local usage and product non-goals.

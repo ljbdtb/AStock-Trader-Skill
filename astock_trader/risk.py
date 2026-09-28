@@ -105,6 +105,10 @@ def market_data_quality(df, meta, now=None, max_age_minutes=15):
 
 def gate_decision(action,t_action,position,data_ok,concentration_limit=0.50,
                   invalidation=None):
+    """Filter recommendations using data, T+1, concentration and risk constraints.
+
+    This is not broker pre-trade approval and does not send orders.
+    """
     if not data_ok or position is None:
         return "WAIT","WAIT"
     if action not in {"HOLD","WAIT","REDUCE"}:

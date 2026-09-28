@@ -129,7 +129,8 @@ def test_decision_uses_same_snapshot_for_display_and_risk(monkeypatch):
     assert out["structural_invalidation_confirmed"]
     assert out["risk_active"]
     assert out["risk_status"] == "CONFIRMED_INVALIDATION"
-    assert out["reduce_quantity"] == 100
+    assert out["max_reducible_qty"] == 100
+    assert "reduce_quantity" not in out
     assert "STRUCTURE_INVALIDATED" in out["risk_reason_codes"]
     from astock_trader.card import render_card
     card = render_card({**out, "symbol": "002475"})
@@ -155,7 +156,7 @@ def test_decision_preserves_risk_through_rebound_and_bad_data(monkeypatch):
     first = decision.decide(row, position=ledger, data_ok=True)
     assert first["risk_active"]
     assert first["decision_status"] == "REDUCE_BLOCKED_T1"
-    assert first["reduce_quantity"] == 0
+    assert first["max_reducible_qty"] == 0
     from astock_trader.card import render_card
     assert "REDUCE_BLOCKED_T1" in render_card({**first, "symbol": "002475"})
     previous = {"active": first["risk_active"],
@@ -235,10 +236,13 @@ def test_decision_caps_reduce_quantity_at_sellable_core(monkeypatch):
                             bought_core_today=200, t_shares=400)
     out = decision.decide(row, position=ledger, data_ok=True)
     assert out["action"] == "REDUCE"
-    assert out["reduce_quantity"] == 1600
+    assert out["max_reducible_qty"] == 1600
     assert "REDUCE_LIMITED_BY_T1" in out["risk_reason_codes"]
     from astock_trader.card import render_card
-    assert "REDUCE 1600股" in render_card({**out, "symbol": "002475"})
+    card = render_card({**out, "symbol": "002475"})
+    assert "核心动作: REDUCE" in card
+    assert "可减核心仓上限: ≤1600股" in card
+    assert "REDUCE 1600股" not in card
 
 
 def test_card_marks_missing_structural_level_as_unavailable():

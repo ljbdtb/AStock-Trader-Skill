@@ -21,11 +21,15 @@ def decide(df,portfolio_weight=None,mtf_alignment=0.5,relative_strength=0.5,
         data_ok=data_ok,previous=previous_risk)
     action,t_action=gate_decision(
         action,t_action,position,data_ok,invalidation=invalidation)
-    reduce_quantity=(position.sellable_core_shares
-                     if action=="REDUCE" and position is not None else 0)
+    max_reducible_qty=(position.sellable_core_shares
+                       if action=="REDUCE" and position is not None else 0)
+    max_sell_t_qty=(position.sellable_t_shares
+                    if t_action=="SELL_T" and position is not None else 0)
+    max_buyback_t_qty=(position.buyback_remaining
+                       if t_action=="BUYBACK_T" and position is not None else 0)
     if not data_ok:
         decision_status="WAIT_DATA"
-    elif invalidation.active and reduce_quantity==0:
+    elif invalidation.active and max_reducible_qty==0:
         decision_status="REDUCE_BLOCKED_T1"
     else:
         decision_status=action
@@ -52,7 +56,9 @@ def decide(df,portfolio_weight=None,mtf_alignment=0.5,relative_strength=0.5,
       "structural_invalidation_reason_codes":invalidation.reason_codes,
       "risk_active":invalidation.active,"risk_status":invalidation.status,
       "risk_reason_codes":risk_codes,"decision_status":decision_status,
-      "reduce_quantity":reduce_quantity,
+      "max_reducible_qty":max_reducible_qty,
+      "max_sell_t_qty":max_sell_t_qty,
+      "max_buyback_t_qty":max_buyback_t_qty,
       "volume_ratio":round(f["volume_ratio"],2),"sellable_shares":sellable,
       "sellable_t_shares":position.sellable_t_shares if position is not None else 0,
       "buyback_remaining":position.buyback_remaining if position is not None else 0,

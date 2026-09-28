@@ -1,4 +1,4 @@
-"""A-share execution constraints and T-position state machine."""
+"""A-share T+1 and T-position constraints for decision recommendations."""
 
 def same_day_sellable(total_shares,today_bought):
     # A-share ordinary stocks are generally T+1: shares bought today are not sellable today.

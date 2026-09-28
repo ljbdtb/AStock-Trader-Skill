@@ -13,4 +13,5 @@ def test_engine_runs():
     })
     out=decide(add_indicators(df),0.95)
     assert 0 <= out["score"] <= 100
-    assert out["action"] in {"HOLD","WAIT","BUY_T","SELL_T","REDUCE"}
+    assert out["action"] in {"HOLD","WAIT","REDUCE"}
+    assert out["t_action"] in {"WAIT","SELL_T","BUYBACK_T"}
