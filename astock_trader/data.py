@@ -17,14 +17,16 @@ def _record(source,ok,error=None):
     x["ok" if ok else "fail"]+=1
     x["last_error"]=None if ok else str(error)
 
-def normalize(df):
+def normalize(df, drop_missing=True):
     mapping={"时间":"time","日期":"time","开盘":"open","收盘":"close","最高":"high",
              "最低":"low","成交量":"volume","成交额":"amount"}
     df=df.rename(columns={k:v for k,v in mapping.items() if k in df.columns})
     for c in ("open","high","low","close","volume"):
         if c in df: df[c]=pd.to_numeric(df[c],errors="coerce")
     if "time" in df: df["time"]=pd.to_datetime(df["time"],errors="coerce")
-    return df.dropna(subset=["open","high","low","close","volume"]).reset_index(drop=True)
+    if drop_missing:
+        df=df.dropna(subset=["open","high","low","close","volume"])
+    return df.reset_index(drop=True)
 
 def realtime_quote(symbol):
     """Best-effort quote with provider fallback. Never fabricates missing data."""
@@ -66,13 +68,13 @@ def _quote_eastmoney(requests,code):
             "high":d["f44"]/100,"low":d["f45"]/100,"open":d["f46"]/100,
             "volume":d.get("f47",0),"amount":d.get("f48",0),"pre_close":d["f60"]/100}
 
-def fetch_intraday(symbol,period="5",retries=2):
+def fetch_intraday(symbol,period="5",retries=2,drop_missing=True):
     """Minute bars via AKShare/Eastmoney, with explicit timestamp metadata."""
     import akshare as ak
     last=None
     for attempt in range(retries+1):
         try:
-            df=normalize(ak.stock_zh_a_hist_min_em(symbol=str(symbol).zfill(6),period=period,adjust=""))
+            df=normalize(ak.stock_zh_a_hist_min_em(symbol=str(symbol).zfill(6),period=period,adjust=""),drop_missing=drop_missing)
             if df.empty: raise RuntimeError("empty minute bars")
             stamp=df.time.iloc[-1].isoformat() if "time" in df and pd.notna(df.time.iloc[-1]) else None
             _record("akshare_eastmoney",True)
@@ -83,10 +85,10 @@ def fetch_intraday(symbol,period="5",retries=2):
             if attempt<retries: time.sleep(.5*(attempt+1))
     raise RuntimeError(f"minute data failed: {last}")
 
-def fetch_frames(symbol,periods=("1","5","15")):
+def fetch_frames(symbol,periods=("1","5","15"),drop_missing=True):
     frames={}; metas={}
     for p in periods:
-        try: frames[p],metas[p]=fetch_intraday(symbol,p)
+        try: frames[p],metas[p]=fetch_intraday(symbol,p,drop_missing=drop_missing)
         except Exception as e: metas[p]={"error":str(e)}
     return frames,metas
 

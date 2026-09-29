@@ -721,12 +721,13 @@ def _select_complete_provider_bars(frame, period, provider_metadata):
     cutoff = pd.Timestamp(fetched_at) if fetched_at else pd.Timestamp.now(tz=SHANGHAI)
     if cutoff.tzinfo is not None:
         cutoff = cutoff.tz_convert(SHANGHAI).tz_localize(None)
-    cutoff = cutoff.floor("min")
+    # Provider timestamps may mark bar starts; wait for the full period to elapse.
+    complete_at = times + pd.Timedelta(minutes=int(period))
     latest_session = times.iloc[-1].date()
     session_mask = (times.dt.date == latest_session) if period == "1" else pd.Series(
         True, index=frame.index
     )
-    complete_mask = times < cutoff
+    complete_mask = complete_at <= cutoff
     selected = frame.loc[session_mask & complete_mask].copy()
     audit = {
         "raw_row_count": int(len(frame)),
@@ -743,7 +744,9 @@ def collect_acceptance_data(output_dir, symbols, fetch_frames_fn=None,
                             fetch_daily_fn=None):
     """Fetch real provider bars to canonical files; never synthesizes missing data."""
     if fetch_frames_fn is None:
-        fetch_frames_fn = fetch_frames
+        fetch_frames_fn = lambda symbol, periods: fetch_frames(
+            symbol, periods=periods, drop_missing=False
+        )
     if fetch_daily_fn is None:
         fetch_daily_fn = fetch_daily_inputs
     root = Path(output_dir)
