@@ -367,3 +367,31 @@ def test_collector_does_not_write_a_partial_symbol_bundle(tmp_path):
 
     assert result["assets"][0]["status"] == "FAIL"
     assert not (tmp_path / "002475").exists()
+
+
+def test_live_acceptance_rejects_a_missing_raw_minute_open(monkeypatch):
+    """The live entry point must reject provider rows that normalization drops."""
+    import akshare as ak
+
+    frames, stock, benchmark = _inputs()
+    frames["1"].loc[10, "open"] = None
+    names = {"time": "时间", "open": "开盘", "high": "最高",
+             "low": "最低", "close": "收盘", "volume": "成交量"}
+    monkeypatch.setattr(
+        ak, "stock_zh_a_hist_min_em",
+        lambda symbol, period, adjust: frames[period].rename(columns=names),
+    )
+    monkeypatch.setattr(
+        decision_replay, "fetch_daily_inputs",
+        lambda symbol, as_of: (stock, benchmark),
+    )
+
+    report = decision_replay.run_real_data_acceptance(
+        {"002475": "立讯精密"}, max_samples=1,
+    )
+
+    asset = report["assets"][0]
+    assert asset["status"] == "FAIL"
+    assert asset.get("trace_count", 0) == 0
+    assert any("numeric values must be finite" in error
+               for error in asset["schema_failures"])
