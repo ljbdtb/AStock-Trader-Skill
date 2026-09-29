@@ -395,3 +395,104 @@ def test_live_acceptance_rejects_a_missing_raw_minute_open(monkeypatch):
     assert asset.get("trace_count", 0) == 0
     assert any("numeric values must be finite" in error
                for error in asset["schema_failures"])
+
+
+def test_sina_collector_uses_native_bars_and_daily_source_contract(
+        tmp_path, monkeypatch):
+    import akshare as ak
+
+    frames, stock, benchmark = _inputs()
+    calls = []
+    def minute(symbol, period, adjust):
+        calls.append((symbol, period, adjust))
+        return frames[period].rename(columns={"time": "day"})
+    def daily(symbol, adjust):
+        calls.append(("daily", symbol, adjust))
+        return stock
+    def index(symbol):
+        calls.append(("index", symbol))
+        return benchmark
+    monkeypatch.setattr(ak, "stock_zh_a_minute", minute)
+    monkeypatch.setattr(ak, "stock_zh_a_daily", daily)
+    monkeypatch.setattr(ak, "stock_zh_index_daily", index)
+
+    result = decision_replay.collect_acceptance_data(
+        tmp_path, {"002475": "立讯精密"}, provider="sina",
+    )
+
+    asset = result["assets"][0]
+    assert asset["status"] == "PASS"
+    assert calls == [
+        ("sz002475", "1", ""), ("sz002475", "5", ""),
+        ("sz002475", "15", ""), ("daily", "sz002475", "qfq"),
+        ("index", "sh000300"),
+    ]
+    assert result["provider"] == "AKShare/Sina"
+    assert asset["source_metadata"]["1m"]["adjustment"] == "none"
+    assert asset["source_metadata"]["daily_stock"]["adjustment"] == "qfq"
+    assert asset["source_metadata"]["daily_csi300"]["adjustment"] == "price_index"
+    saved = pd.read_csv(tmp_path / "002475" / "1m.csv")
+    assert len(saved) == len(frames["1"])
+    assert saved["time"].iloc[0] == str(frames["1"].time.iloc[0])
+
+
+def test_sina_collector_preserves_prior_valid_1m_days_and_waits_for_complete_bar(
+        tmp_path):
+    frames, stock, benchmark = _inputs()
+    old = _bars(2, 1)
+    old["time"] = pd.to_datetime(["2026-09-28 14:59", "2026-09-28 15:00"])
+    current = _bars(3, 1)
+    current["time"] = pd.to_datetime([
+        "2026-09-29 10:01", "2026-09-29 10:02", "2026-09-29 10:03"
+    ])
+    frames["1"] = pd.concat([old, current], ignore_index=True)
+    metadata = {
+        period: {"provider": "AKShare/Sina",
+                 "fetched_at": "2026-09-29T10:03:30+08:00",
+                 "timestamp_convention": "BAR_END"}
+        for period in ("1", "5", "15")
+    }
+
+    result = decision_replay.collect_acceptance_data(
+        tmp_path, {"002475": "立讯精密"}, provider="sina",
+        fetch_frames_fn=lambda symbol, periods: (frames, metadata),
+        fetch_daily_fn=lambda symbol, as_of: (stock, benchmark),
+    )
+
+    asset = result["assets"][0]
+    assert asset["status"] == "PASS"
+    saved = pd.read_csv(tmp_path / "002475" / "1m.csv")
+    assert saved["time"].tolist() == [
+        "2026-09-28 14:59:00", "2026-09-28 15:00:00",
+        "2026-09-29 10:01:00", "2026-09-29 10:02:00",
+    ]
+    source = asset["source_metadata"]["1m"]
+    assert source["raw_row_count"] == 5
+    assert source["excluded_prior_session_rows"] == 0
+    assert source["excluded_incomplete_rows"] == 1
+
+
+def test_sina_collector_rejects_invalid_old_1m_row_before_time_filter(tmp_path):
+    frames, stock, benchmark = _inputs()
+    old = _bars(1, 1)
+    old["time"] = pd.to_datetime(["2026-09-28 15:00"])
+    old.loc[0, "open"] = None
+    current = _bars(2, 1)
+    current["time"] = pd.to_datetime(["2026-09-29 10:01", "2026-09-29 10:02"])
+    frames["1"] = pd.concat([old, current], ignore_index=True)
+
+    result = decision_replay.collect_acceptance_data(
+        tmp_path, {"002475": "立讯精密"}, provider="sina",
+        fetch_frames_fn=lambda symbol, periods: (
+            frames,
+            {period: {"provider": "AKShare/Sina",
+                      "fetched_at": "2026-09-29T10:03:30+08:00"}
+             for period in periods},
+        ),
+        fetch_daily_fn=lambda symbol, as_of: (stock, benchmark),
+    )
+
+    asset = result["assets"][0]
+    assert asset["status"] == "FAIL"
+    assert "numeric values must be finite" in asset["errors"][0]
+    assert not (tmp_path / "002475").exists()
