@@ -650,99 +650,14 @@ def fetch_sina_daily_inputs(symbol, as_of):
     return stock, benchmark
 
 
-def run_real_data_acceptance(symbols=None, max_samples=120, sample_sleep=0.0):
-    """Fetch public historical data and report provider/data/causality failures."""
-    symbols = symbols or REAL_DATA_UNIVERSE
-    report = {
-        "purpose": "software and semantic acceptance only; not OOS performance",
-        "input_mode": "LIVE_PROVIDER",
-        "timestamp_convention": "provider bar timestamps treated as completed-bar timestamps; verify source semantics",
-        "strategy_parameters_changed": "NONE",
-        "assets": [],
-    }
-    for symbol, name in symbols.items():
-        asset = {
-            "symbol": str(symbol), "name": name, "source_type": "LIVE_PROVIDER",
-            "data_origin": "LIVE_PROVIDER", "status": "FAIL", "errors": [],
-            "schema_failures": [], "causality_failures": [],
-            "decision_trace_failures": [], "provider_failures": 0,
-        }
-        try:
-            frames, provider_meta = fetch_frames(symbol, periods=("1", "5", "15"))
-            missing_periods = {"1", "5", "15"} - set(frames)
-            if missing_periods:
-                asset["provider_failures"] = 1
-                raise RuntimeError(
-                    f"provider omitted required timeframe data {sorted(missing_periods)}; "
-                    f"provider results: {provider_meta}"
-                )
-            frames = {
-                period: _validate_market_frame(frames[period], period)
-                for period in ("1", "5", "15")
-            }
-            if frames["5"].empty:
-                raise RuntimeError(f"no usable 5-minute history; provider results: {provider_meta}")
-            last_date = pd.Timestamp(frames["5"]["time"].iloc[-1]).date()
-            stock_daily, benchmark_daily = fetch_daily_inputs(symbol, last_date)
-            source_metadata = {
-                period: _source_metadata(
-                    frame, "LIVE_PROVIDER", None, symbol, period, provider="AKShare",
-                    data_origin="LIVE_PROVIDER",
-                )
-                for period, frame in frames.items() if period in {"1", "5", "15"}
-            }
-            stock_clean = _validate_market_frame(
-                stock_daily.rename(columns={"日期": "date", "收盘": "close"}),
-                "daily_stock",
-            )
-            benchmark_clean = _validate_market_frame(benchmark_daily, "daily_csi300")
-            source_metadata["daily_stock"] = _source_metadata(
-                stock_clean, "LIVE_PROVIDER", None, symbol, "daily_stock",
-                provider="AKShare", data_origin="LIVE_PROVIDER",
-            )
-            source_metadata["daily_csi300"] = _source_metadata(
-                benchmark_clean, "LIVE_PROVIDER", None, "sh000300", "daily_csi300",
-                provider="AKShare", data_origin="LIVE_PROVIDER",
-            )
-            asset["source_metadata"] = source_metadata
-            decision_times = _sample_times(frames["5"], max_samples, frames=frames)
-            traces = replay_decisions(
-                symbol, frames, stock_clean, benchmark_clean,
-                decision_times=decision_times,
-            )
-            asset["traces"] = traces
-            asset["trace_count"] = len(traces)
-            asset["regimes_seen"] = sorted({
-                trace.get("regime") for trace in traces if trace.get("regime")
-            })
-            asset["scenario_coverage"] = sorted({
-                tag for trace in traces for tag in trace.get("scenario_tags", [])
-            })
-            asset["causality_checks"] = min(3, len(decision_times))
-            asset["causality_failures"] = _causality_failures(
-                symbol, frames, stock_clean, benchmark_clean, decision_times
-            )
-            asset["decision_trace_failures"] = [
-                {"timestamp": trace.get("timestamp"), "failures": failures}
-                for trace in traces if (failures := _trace_failures(trace))
-            ]
-            times = pd.to_datetime(frames["5"]["time"])
-            asset["data_date_range"] = [times.iloc[0].isoformat(), times.iloc[-1].isoformat()]
-            asset["status"] = "PASS" if traces else "FAIL"
-            if sample_sleep:
-                time.sleep(sample_sleep)
-        except Exception as exc:
-            message = f"{type(exc).__name__}: {exc}"
-            asset["errors"].append(message)
-            if str(exc).startswith(("1:", "5:", "15:", "1m:", "5m:", "15m:", "daily_stock:", "daily_csi300:")):
-                asset["schema_failures"].append(message)
-            elif not asset.get("source_metadata"):
-                asset["provider_failures"] = max(asset.get("provider_failures", 0), 1)
-        report["assets"].append(asset)
-    report = _finalize_acceptance(report)
-    report["loaded_assets"] = sum(asset["status"] == "PASS" for asset in report["assets"])
-    return report
-
+def run_real_data_acceptance(symbols=None, max_samples=120, sample_sleep=0.0,
+                             output_dir="acceptance-data",
+                             report_path="decision-replay-report.json"):
+    """Preserve provider evidence and replay through the strict collector path."""
+    return collect_and_replay(
+        output_dir, symbols or REAL_DATA_UNIVERSE, max_samples=max_samples,
+        report_path=report_path, provider="eastmoney", sample_sleep=sample_sleep,
+    )
 
 
 def _select_complete_provider_bars(frame, period, provider_metadata):
@@ -779,7 +694,8 @@ def _select_complete_provider_bars(frame, period, provider_metadata):
 
 
 def collect_acceptance_data(output_dir, symbols, fetch_frames_fn=None,
-                            fetch_daily_fn=None, provider="eastmoney"):
+                            fetch_daily_fn=None, provider="eastmoney",
+                            sample_sleep=0.0):
     """Fetch real provider bars to canonical files; never synthesizes missing data."""
     if provider not in {"eastmoney", "sina"}:
         raise ValueError("provider must be eastmoney or sina")
@@ -869,6 +785,8 @@ def collect_acceptance_data(output_dir, symbols, fetch_frames_fn=None,
         except Exception as exc:
             asset["errors"].append(f"{type(exc).__name__}: {exc}")
         result["assets"].append(asset)
+        if sample_sleep:
+            time.sleep(sample_sleep)
 
     manifest_path = root / "collection-manifest.json"
     manifest_path.write_text(
@@ -880,10 +798,11 @@ def collect_acceptance_data(output_dir, symbols, fetch_frames_fn=None,
 def collect_and_replay(output_dir, symbols, max_samples=120,
                        report_path="decision-replay-report.json",
                        fetch_frames_fn=None, fetch_daily_fn=None,
-                       provider="eastmoney"):
+                       provider="eastmoney", sample_sleep=0.0):
     collection = collect_acceptance_data(
         output_dir, symbols, fetch_frames_fn=fetch_frames_fn,
         fetch_daily_fn=fetch_daily_fn, provider=provider,
+        sample_sleep=sample_sleep,
     )
     collected = {
         asset["symbol"]: asset["name"] for asset in collection["assets"]
@@ -968,7 +887,11 @@ def main():
             data_origin=args.input_origin,
         )
     else:
-        report = run_real_data_acceptance(symbols, max_samples=args.max_samples)
+        output_dir = Path(args.output).parent / f"{Path(args.output).stem}-data"
+        report = run_real_data_acceptance(
+            symbols, max_samples=args.max_samples,
+            output_dir=output_dir, report_path=args.output,
+        )
     Path(args.output).write_text(
         json.dumps(_as_json(report), ensure_ascii=False, indent=2),
         encoding="utf-8",
