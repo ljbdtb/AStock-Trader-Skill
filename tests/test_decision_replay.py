@@ -369,8 +369,9 @@ def test_collector_does_not_write_a_partial_symbol_bundle(tmp_path):
     assert not (tmp_path / "002475").exists()
 
 
-def test_live_acceptance_rejects_a_missing_raw_minute_open(monkeypatch):
-    """The live entry point must reject provider rows that normalization drops."""
+def test_live_acceptance_rejects_a_missing_raw_minute_open(
+        tmp_path, monkeypatch):
+    """The live entry point must reject raw gaps and keep an audit manifest."""
     import akshare as ak
 
     frames, stock, benchmark = _inputs()
@@ -385,16 +386,23 @@ def test_live_acceptance_rejects_a_missing_raw_minute_open(monkeypatch):
         decision_replay, "fetch_daily_inputs",
         lambda symbol, as_of: (stock, benchmark),
     )
+    output_dir = tmp_path / "live-data"
+    report_path = tmp_path / "live-report.json"
 
     report = decision_replay.run_real_data_acceptance(
         {"002475": "立讯精密"}, max_samples=1,
+        output_dir=output_dir, report_path=report_path,
     )
 
-    asset = report["assets"][0]
+    asset = report["collection"]["assets"][0]
     assert asset["status"] == "FAIL"
-    assert asset.get("trace_count", 0) == 0
-    assert any("numeric values must be finite" in error
-               for error in asset["schema_failures"])
+    assert "numeric values must be finite" in asset["errors"][0]
+    assert report["REAL_DATA_ACCEPTANCE"] == "INCOMPLETE"
+    assert report["provider_failures"] == 1
+    assert report["input_mode"] == "LOCAL_FILES_FROM_LIVE_PROVIDER"
+    assert (output_dir / "collection-manifest.json").is_file()
+    assert report_path.is_file()
+    assert not (output_dir / "002475").exists()
 
 
 def test_sina_collector_uses_native_bars_and_daily_source_contract(
