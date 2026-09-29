@@ -298,6 +298,62 @@ def test_collector_keeps_complete_latest_day_1m_without_filling_old_opens(tmp_pa
     assert asset["source_metadata"]["15m"]["row_count"] == len(frames["15"])
 
 
+def test_collector_rejects_missing_latest_1m_open_from_raw_provider(
+        tmp_path, monkeypatch):
+    import akshare as ak
+
+    frames, stock, benchmark = _inputs()
+    frames["1"].loc[10, "open"] = None
+    names = {"time": "时间", "open": "开盘", "high": "最高",
+             "low": "最低", "close": "收盘", "volume": "成交量"}
+
+    def provider(symbol, period, adjust):
+        assert symbol == "002475"
+        assert adjust == ""
+        return frames[period].rename(columns=names)
+
+    monkeypatch.setattr(ak, "stock_zh_a_hist_min_em", provider)
+    result = decision_replay.collect_acceptance_data(
+        tmp_path, {"002475": "立讯精密"},
+        fetch_daily_fn=lambda symbol, as_of: (stock, benchmark),
+    )
+
+    assert result["assets"][0]["status"] == "FAIL"
+    assert "numeric values must be finite" in result["assets"][0]["errors"][0]
+    assert not (tmp_path / "002475").exists()
+
+
+def test_collector_excludes_recent_start_labeled_5m_and_15m_bars(tmp_path):
+    frames, stock, benchmark = _inputs()
+    frames["1"] = _bars(3, 1)
+    frames["1"]["time"] = pd.to_datetime([
+        "2026-09-29 09:59", "2026-09-29 10:00", "2026-09-29 10:01"
+    ])
+    for period in ("5", "15"):
+        frames[period].loc[frames[period].index[-1], "time"] = pd.Timestamp(
+            "2026-09-29 10:00"
+        )
+    result = decision_replay.collect_acceptance_data(
+        tmp_path, {"002475": "立讯精密"},
+        fetch_frames_fn=lambda symbol, periods: (
+            frames,
+            {period: {"provider": "AKShare/Eastmoney",
+                      "fetched_at": "2026-09-29T10:03:30+08:00"}
+             for period in periods},
+        ),
+        fetch_daily_fn=lambda symbol, as_of: (stock, benchmark),
+    )
+
+    asset = result["assets"][0]
+    assert asset["status"] == "PASS"
+    for period in ("5", "15"):
+        source = asset["source_metadata"][f"{period}m"]
+        assert source["excluded_incomplete_rows"] == 1
+        assert source["row_count"] == len(frames[period]) - 1
+        saved = pd.read_csv(tmp_path / "002475" / f"{period}m.csv")
+        assert saved["time"].iloc[-1] != "2026-09-29 10:00:00"
+
+
 def test_collector_does_not_write_a_partial_symbol_bundle(tmp_path):
     frames, _, _ = _inputs()
 
