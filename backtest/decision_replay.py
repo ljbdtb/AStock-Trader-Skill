@@ -710,6 +710,35 @@ def run_real_data_acceptance(symbols=None, max_samples=120, sample_sleep=0.0):
 
 
 
+def _select_complete_provider_bars(frame, period, provider_metadata):
+    """Keep observed bars only; old Eastmoney 1m opens are unavailable."""
+    if not isinstance(frame, pd.DataFrame) or frame.empty or "time" not in frame:
+        raise ValueError(f"{period}: provider minute bars are empty or lack time")
+    times = pd.to_datetime(frame["time"], errors="coerce")
+    if times.isna().any() or times.duplicated().any() or not times.is_monotonic_increasing:
+        raise ValueError(f"{period}: provider timestamps are invalid, duplicate, or unsorted")
+    fetched_at = (provider_metadata or {}).get("fetched_at")
+    cutoff = pd.Timestamp(fetched_at) if fetched_at else pd.Timestamp.now(tz=SHANGHAI)
+    if cutoff.tzinfo is not None:
+        cutoff = cutoff.tz_convert(SHANGHAI).tz_localize(None)
+    cutoff = cutoff.floor("min")
+    latest_session = times.iloc[-1].date()
+    session_mask = (times.dt.date == latest_session) if period == "1" else pd.Series(
+        True, index=frame.index
+    )
+    complete_mask = times < cutoff
+    selected = frame.loc[session_mask & complete_mask].copy()
+    audit = {
+        "raw_row_count": int(len(frame)),
+        "raw_first_timestamp": times.iloc[0].isoformat(),
+        "raw_last_timestamp": times.iloc[-1].isoformat(),
+        "excluded_prior_session_rows": int((~session_mask).sum()),
+        "excluded_incomplete_rows": int((session_mask & ~complete_mask).sum()),
+        "retained_session": latest_session.isoformat() if period == "1" else None,
+    }
+    return selected, audit
+
+
 def collect_acceptance_data(output_dir, symbols, fetch_frames_fn=None,
                             fetch_daily_fn=None):
     """Fetch real provider bars to canonical files; never synthesizes missing data."""
@@ -733,10 +762,13 @@ def collect_acceptance_data(output_dir, symbols, fetch_frames_fn=None,
                 raise RuntimeError(
                     f"provider omitted periods {sorted(missing)}; details={provider_meta}"
                 )
-            clean_frames = {
-                period: _validate_market_frame(frames[period], period)
-                for period in ("1", "5", "15")
-            }
+            selected_frames, selection_audits = {}, {}
+            for period in ("1", "5", "15"):
+                selected, selection_audits[period] = _select_complete_provider_bars(
+                    frames[period], period, provider_meta.get(period)
+                )
+                selected_frames[period] = _validate_market_frame(selected, period)
+            clean_frames = selected_frames
             latest = pd.Timestamp(clean_frames["5"]["time"].iloc[-1]).date()
             stock_daily, benchmark_daily = fetch_daily_fn(symbol, latest)
             stock_daily = stock_daily.rename(columns={"日期": "date", "收盘": "close"})
@@ -769,6 +801,8 @@ def collect_acceptance_data(output_dir, symbols, fetch_frames_fn=None,
                     provider="AKShare/Eastmoney", data_origin="REAL_HISTORICAL",
                 )
                 metadata[timeframe]["fetched_at"] = datetime.now().astimezone().isoformat()
+                if timeframe in {"1m", "5m", "15m"}:
+                    metadata[timeframe].update(selection_audits[timeframe[:-1]])
             asset["source_metadata"] = metadata
             asset["provider_metadata"] = provider_meta
             asset["status"] = "PASS"
