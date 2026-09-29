@@ -615,6 +615,41 @@ def fetch_daily_inputs(symbol, as_of):
 
 
 
+def _sina_symbol(symbol):
+    code = str(symbol).zfill(6)
+    return ("sh" if code.startswith(("60", "68", "9")) else "sz") + code
+
+
+def fetch_sina_frames(symbol, periods=("1", "5", "15")):
+    """Fetch native Sina bars without repairing or dropping provider rows."""
+    import akshare as ak
+
+    frames, metadata = {}, {}
+    for period in periods:
+        raw = ak.stock_zh_a_minute(
+            symbol=_sina_symbol(symbol), period=period, adjust=""
+        )
+        if not isinstance(raw, pd.DataFrame):
+            raise ValueError(f"{period}: Sina returned no table")
+        frames[period] = raw.rename(columns={"day": "time"})
+        metadata[period] = {
+            "provider": "AKShare/Sina",
+            "fetched_at": datetime.now().astimezone().isoformat(),
+            "adjustment": "none",
+            "timestamp_convention": "BAR_END_REPORTED",
+        }
+    return frames, metadata
+
+
+def fetch_sina_daily_inputs(symbol, as_of):
+    """Sina qfq stock close versus the CSI300 price index."""
+    import akshare as ak
+
+    stock = ak.stock_zh_a_daily(symbol=_sina_symbol(symbol), adjust="qfq")
+    benchmark = ak.stock_zh_index_daily(symbol="sh000300")
+    return stock, benchmark
+
+
 def run_real_data_acceptance(symbols=None, max_samples=120, sample_sleep=0.0):
     """Fetch public historical data and report provider/data/causality failures."""
     symbols = symbols or REAL_DATA_UNIVERSE
@@ -724,8 +759,11 @@ def _select_complete_provider_bars(frame, period, provider_metadata):
     # Provider timestamps may mark bar starts; wait for the full period to elapse.
     complete_at = times + pd.Timedelta(minutes=int(period))
     latest_session = times.iloc[-1].date()
-    session_mask = (times.dt.date == latest_session) if period == "1" else pd.Series(
-        True, index=frame.index
+    retain_history = (provider_metadata or {}).get("provider") == "AKShare/Sina"
+    session_mask = (
+        (times.dt.date == latest_session)
+        if period == "1" and not retain_history
+        else pd.Series(True, index=frame.index)
     )
     complete_mask = complete_at <= cutoff
     selected = frame.loc[session_mask & complete_mask].copy()
@@ -741,18 +779,26 @@ def _select_complete_provider_bars(frame, period, provider_metadata):
 
 
 def collect_acceptance_data(output_dir, symbols, fetch_frames_fn=None,
-                            fetch_daily_fn=None):
+                            fetch_daily_fn=None, provider="eastmoney"):
     """Fetch real provider bars to canonical files; never synthesizes missing data."""
+    if provider not in {"eastmoney", "sina"}:
+        raise ValueError("provider must be eastmoney or sina")
+    provider_name = "AKShare/Sina" if provider == "sina" else "AKShare/Eastmoney"
     if fetch_frames_fn is None:
-        fetch_frames_fn = lambda symbol, periods: fetch_frames(
-            symbol, periods=periods, drop_missing=False
-        )
+        if provider == "sina":
+            fetch_frames_fn = fetch_sina_frames
+        else:
+            fetch_frames_fn = lambda symbol, periods: fetch_frames(
+                symbol, periods=periods, drop_missing=False
+            )
     if fetch_daily_fn is None:
-        fetch_daily_fn = fetch_daily_inputs
+        fetch_daily_fn = (
+            fetch_sina_daily_inputs if provider == "sina" else fetch_daily_inputs
+        )
     root = Path(output_dir)
     root.mkdir(parents=True, exist_ok=True)
     result = {
-        "source_type": "LIVE_PROVIDER", "provider": "AKShare/Eastmoney",
+        "source_type": "LIVE_PROVIDER", "provider": provider_name,
         "generated_at": datetime.now().astimezone().isoformat(),
         "assets": [],
     }
@@ -767,8 +813,10 @@ def collect_acceptance_data(output_dir, symbols, fetch_frames_fn=None,
                 )
             selected_frames, selection_audits = {}, {}
             for period in ("1", "5", "15"):
+                raw = (_validate_market_frame(frames[period], period)
+                       if provider == "sina" else frames[period])
                 selected, selection_audits[period] = _select_complete_provider_bars(
-                    frames[period], period, provider_meta.get(period)
+                    raw, period, provider_meta.get(period)
                 )
                 selected_frames[period] = _validate_market_frame(selected, period)
             clean_frames = selected_frames
@@ -801,8 +849,17 @@ def collect_acceptance_data(output_dir, symbols, fetch_frames_fn=None,
                     frame, "LIVE_PROVIDER", f"{symbol}/{path.name}", symbol,
                     timeframe if timeframe.startswith("daily_") else timeframe[:-1],
                     checksum=hashlib.sha256(payload).hexdigest(),
-                    provider="AKShare/Eastmoney", data_origin="REAL_HISTORICAL",
+                    provider=provider_name, data_origin="REAL_HISTORICAL",
                 )
+                if provider == "sina":
+                    metadata[timeframe]["adjustment"] = (
+                        "none" if timeframe in {"1m", "5m", "15m"}
+                        else "qfq" if timeframe == "daily_stock" else "price_index"
+                    )
+                    if timeframe in {"1m", "5m", "15m"}:
+                        metadata[timeframe]["timestamp_convention"] = (
+                            "provider-reported bar end; one extra period withheld"
+                        )
                 metadata[timeframe]["fetched_at"] = datetime.now().astimezone().isoformat()
                 if timeframe in {"1m", "5m", "15m"}:
                     metadata[timeframe].update(selection_audits[timeframe[:-1]])
@@ -822,10 +879,11 @@ def collect_acceptance_data(output_dir, symbols, fetch_frames_fn=None,
 
 def collect_and_replay(output_dir, symbols, max_samples=120,
                        report_path="decision-replay-report.json",
-                       fetch_frames_fn=None, fetch_daily_fn=None):
+                       fetch_frames_fn=None, fetch_daily_fn=None,
+                       provider="eastmoney"):
     collection = collect_acceptance_data(
         output_dir, symbols, fetch_frames_fn=fetch_frames_fn,
-        fetch_daily_fn=fetch_daily_fn,
+        fetch_daily_fn=fetch_daily_fn, provider=provider,
     )
     collected = {
         asset["symbol"]: asset["name"] for asset in collection["assets"]
@@ -841,6 +899,8 @@ def collect_and_replay(output_dir, symbols, max_samples=120,
             "purpose": "software and semantic acceptance only; not OOS performance",
             "input_mode": "LOCAL_FILES_FROM_LIVE_PROVIDER", "assets": [],
         })
+    report["input_mode"] = "LOCAL_FILES_FROM_LIVE_PROVIDER"
+    report["provider"] = collection["provider"]
     collection_failures = sum(asset["status"] != "PASS" for asset in collection["assets"])
     report["provider_failures"] = report.get("provider_failures", 0) + collection_failures
     report["collection_failures"] = collection_failures
@@ -854,6 +914,8 @@ def collect_and_replay(output_dir, symbols, max_samples=120,
 def collection_main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", default="acceptance-data")
+    parser.add_argument("--provider", choices=("eastmoney", "sina"),
+                        default="eastmoney")
     parser.add_argument("--report-output", default="decision-replay-report.json")
     parser.add_argument("--max-samples", type=int, default=120)
     parser.add_argument("--symbols", nargs="*", default=list(REAL_DATA_UNIVERSE),
@@ -862,7 +924,7 @@ def collection_main():
     symbols = {code: REAL_DATA_UNIVERSE[code] for code in args.symbols}
     report = collect_and_replay(
         args.output_dir, symbols, max_samples=args.max_samples,
-        report_path=args.report_output,
+        report_path=args.report_output, provider=args.provider,
     )
     print(json.dumps({
         "REAL_DATA_ACCEPTANCE": report.get("REAL_DATA_ACCEPTANCE"),
