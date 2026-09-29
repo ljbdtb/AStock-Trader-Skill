@@ -256,6 +256,48 @@ def test_collector_persists_only_validated_provider_bundles_and_provenance(tmp_p
         assert (tmp_path / "002475" / filename).is_file()
 
 
+def test_collector_keeps_complete_latest_day_1m_without_filling_old_opens(tmp_path):
+    frames, stock, benchmark = _inputs()
+    old = _bars(2, 1)
+    old["time"] = pd.to_datetime(["2026-09-28 14:59", "2026-09-28 15:00"])
+    old["open"] = 0.0  # Eastmoney reports unavailable prior-session 1m opens as zero.
+    current = _bars(3, 1)
+    current["time"] = pd.to_datetime([
+        "2026-09-29 10:01", "2026-09-29 10:02", "2026-09-29 10:03"
+    ])
+    frames["1"] = pd.concat([old, current], ignore_index=True)
+
+    result = decision_replay.collect_acceptance_data(
+        tmp_path, {"002475": "立讯精密"},
+        fetch_frames_fn=lambda symbol, periods: (
+            frames,
+            {period: {"provider": "AKShare/Eastmoney",
+                      "fetched_at": "2026-09-29T10:03:30+08:00"}
+             for period in periods},
+        ),
+        fetch_daily_fn=lambda symbol, as_of: (stock, benchmark),
+    )
+
+    asset = result["assets"][0]
+    assert asset["status"] == "PASS"
+    saved = pd.read_csv(tmp_path / "002475" / "1m.csv")
+    assert saved["time"].tolist() == [
+        "2026-09-29 10:01:00", "2026-09-29 10:02:00"
+    ]
+    assert saved["open"].tolist() == current["open"].iloc[:2].tolist()
+    source = asset["source_metadata"]["1m"]
+    assert source["raw_row_count"] == 5
+    assert source["raw_first_timestamp"] == "2026-09-28T14:59:00"
+    assert source["raw_last_timestamp"] == "2026-09-29T10:03:00"
+    assert source["excluded_prior_session_rows"] == 2
+    assert source["excluded_incomplete_rows"] == 1
+    assert source["row_count"] == 2
+    assert source["first_timestamp"] == "2026-09-29T10:01:00"
+    assert source["last_timestamp"] == "2026-09-29T10:02:00"
+    assert asset["source_metadata"]["5m"]["row_count"] == len(frames["5"])
+    assert asset["source_metadata"]["15m"]["row_count"] == len(frames["15"])
+
+
 def test_collector_does_not_write_a_partial_symbol_bundle(tmp_path):
     frames, _, _ = _inputs()
 
